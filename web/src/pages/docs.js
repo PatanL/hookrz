@@ -285,7 +285,7 @@ app.innerHTML = `
           <li>No loops and no calls out. Comparisons, arithmetic and the reads on the left.</li>
           <li>At most 8,000 CU, worst case, or it doesn't compile.</li>
           <li>16 ops and three constants: it lives in the Stack's script area and its slot.</li>
-          <li>Fuzzed against 10,000 simulated trades before launch. Zero panics required; the refusal rate is shown.</li>
+          <li>Fuzzed against 10,000 generated trades before launch. Zero panics required; the refusal rate is shown.</li>
           <li>The coin page shows an <span class="chip warnchip">Unreviewed</span> badge until a reviewer signs off.</li>
         </ul>
       </div>

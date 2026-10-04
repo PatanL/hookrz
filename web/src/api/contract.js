@@ -11,7 +11,7 @@ export const SERVICES = [
   { id: 'api', name: 'API', kind: 'Service', blurb: 'Builds unsigned launch and trade transactions, gives rule-aware quotes, validates and simulates stacks. Holds no keys.' },
   { id: 'indexer', name: 'Indexer', kind: 'Service', blurb: 'Follows the engine, DBC and DAMM v2 programs; writes coins, trades, verdicts and remix lineage to Postgres; pushes the live stream.' },
   { id: 'keeper', name: 'Keeper', kind: 'Service', blurb: 'Permissionless crank for Crank blocks: claims fee vaults, buys back and burns, posts reward roots, pays stack royalties. Anyone can run it.' },
-  { id: 'hookscript', name: 'Hookscript compiler', kind: 'Service', blurb: 'Turns an English rule into Hookscript with an LLM, compiles it to engine ops, measures CU and fuzzes it against 10,000 simulated trades.' },
+  { id: 'hookscript', name: 'Hookscript compiler', kind: 'Service', blurb: 'Turns an English rule into Hookscript with an LLM, compiles it to engine ops, measures CU and fuzzes it against 10,000 generated trades.' },
 ];
 
 export const ENDPOINTS = [
@@ -23,7 +23,7 @@ export const ENDPOINTS = [
   { method: 'POST', path: '/v1/quote', fn: 'quote', group: 'Trade', desc: 'Rule-aware quote. If the stack would refuse, returns refusedBy + the largest amount that passes now.' },
   { method: 'POST', path: '/v1/trade/prepare', fn: 'prepareTrade', group: 'Trade', desc: 'Unsigned router swap with hook accounts resolved and the Wallet record opened if needed.' },
   { method: 'POST', path: '/v1/stacks/validate', fn: 'validate', group: 'Stacks', desc: 'CU, extra accounts, rent, route compatibility and warnings for a proposed stack.' },
-  { method: 'POST', path: '/v1/stacks/simulate', fn: 'simulate', group: 'Stacks', desc: 'Runs the stack against a seeded crowd of snipers, bundlers, whales and holders; compares with no rules.' },
+  { method: 'POST', path: '/v1/stacks/simulate', fn: 'simulate', group: 'Stacks', desc: 'Simulates a launch: runs the stack against a seeded crowd of snipers, bundlers, whales and holders and compares it with no rules.' },
   { method: 'GET', path: '/v1/stacks', fn: 'stacks', group: 'Stacks', desc: 'Stacks ranked by remixes and royalties earned, with their authors.' },
   { method: 'GET', path: '/v1/stacks/:id/lineage', fn: 'lineage', group: 'Stacks', desc: 'The remix tree: parent, children and what changed in each remix.' },
   { method: 'POST', path: '/v1/hookscript/draft', fn: 'draftHookscript', group: 'Stacks', desc: 'English → Hookscript draft, compiled ops, CU estimate and fuzz results.' },

@@ -2,6 +2,7 @@
 import { BLOCKS, PRESETS, defaults, hex, rentSol, ENGINE } from '../data/blocks.js';
 import { ENDPOINTS, API_BASE, FEES } from '../api/contract.js';
 import { api } from '../api/client.js';
+import { fakeKey } from '../data/coins.js';
 import { esc } from '../core/format.js';
 import { tintJSON } from './docs-hookscript.js';
 
@@ -22,7 +23,7 @@ export async function apiExamples(root) {
   const fair = PRESETS.find((p) => p.id === 'fair-launch');
   const stack = fair.slots.map(([id]) => ({ id }));
   const quoteReq = { ticker: 'SLOW', side: 'sell', amount: 15_000_000, wallet: { balance: 20_000_000 } };
-  const launchReq = { meta: { name: 'Fair Weather', ticker: 'FAIR' }, stack, creator: '7xKq…creator' };
+  const launchReq = { meta: { name: 'Fair Weather', ticker: 'FAIR' }, stack, creator: fakeKey(77) };
   const [val, quote, launch] = await Promise.all([api.validate(stack), api.quote(quoteReq), api.prepareLaunch(launchReq)]);
   const ex = [
     {

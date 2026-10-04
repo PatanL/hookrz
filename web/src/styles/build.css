@@ -726,6 +726,8 @@ button.st:hover { color: var(--text); }
   .lp { padding: 16px; }
   .crowd { grid-template-columns: minmax(0, 1fr); }
   .ctab .bar-h, .ctab .bar-c, .ctab th:nth-child(2), .ctab td:nth-child(2), .ctab .tried { display: none; }
+  .ctab tr.bot td:first-child::after { display: none; }
+  .ctab { font-size: 12.5px; }
   .steps li.st-sep { margin: 0 8px; }
   .st-l { font-size: 13px; }
   .rv-coin { grid-template-columns: 48px minmax(0, 1fr); }

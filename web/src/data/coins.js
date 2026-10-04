@@ -1,6 +1,6 @@
 // Seed coins served by src/api/client.js while MODE is "demo". They are not on chain.
 // Lineage (parent) is what makes "Remix" visible: a coin launched from another coin's stack.
-import { rng } from '../engine/sim.js';
+import { rng, CURVE, SUPPLY } from '../engine/sim.js';
 
 export const SOL_USD = 150; // demo constant, not a price feed
 
@@ -77,19 +77,27 @@ export const coinBy = Object.fromEntries(COINS.map((c) => [c.ticker, c]));
 /** Derived, deterministic demo stats. */
 export function stats(c, i = COINS.indexOf(c)) {
   const r = rng(1000 + i * 31);
-  const mcapSol = 28 + c.progress * 380 * (0.85 + r() * 0.3) + (c.graduated ? 300 + r() * 2200 : 0);
+  // on the curve, market cap is exactly the curve price at this progress (so quotes and cards agree)
+  const mcapSol = c.graduated ? curveMcapSol(1) * (1.6 + r() * 5.5) : curveMcapSol(c.progress);
   const trades = Math.round(80 + c.progress * 2600 * (0.6 + r()) + (c.graduated ? 4000 : 0));
   const refusedRate = 0.03 + r() * 0.12;
   return {
     mint: fakeKey(i + 1, 'hk'),
     mcapUsd: mcapSol * SOL_USD,
     vol24Usd: mcapSol * SOL_USD * (0.4 + r() * 2.2) * (c.minutesAgo < 1440 ? 1 : 0.45),
-    change24: (r() - 0.32) * (c.minutesAgo < 600 ? 900 : 160),
+    change24: Math.max(-92, (r() - 0.32) * (c.minutesAgo < 600 ? 900 : 160)),
     holders: Math.round(40 + c.progress * 900 * (0.6 + r()) + (c.graduated ? 1400 : 0)),
     trades, checked: trades, refused: Math.round(trades * refusedRate),
     remixes: COINS.filter((x) => x.parent === c.ticker).length,
     royaltiesSol: 0,
   };
+}
+
+/** Market cap (SOL) of a coin whose curve is `progress` filled: price × supply on the virtual-reserve curve. */
+export function curveMcapSol(progress) {
+  const k = CURVE.vSol0 * CURVE.vTok0;
+  const vTok = CURVE.vTok0 - (CURVE.vTok0 - CURVE.gradTok) * Math.min(0.999, progress);
+  return (k / vTok / vTok) * SUPPLY;
 }
 
 /** Lineage helpers. */

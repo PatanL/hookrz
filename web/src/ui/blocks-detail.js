@@ -158,10 +158,10 @@ function crankPanel(b) {
 }
 
 function feePanel(b) {
-  let tSel = 10, buy = 1;
+  let tSel = 10, buy = 1, W = 560;
   const BUYS = [0.1, 0.25, 0.5, 1, 2, 5, 10];
   const chart = (P) => {
-    const W = 560, H = 220, L = 44, R = 16, Tp = 18, B = 34;
+    const H = W < 450 ? 200 : 220, L = 44, R = 16, Tp = 18, B = 34;
     const tMax = Math.max(20, Math.ceil(P.seconds * 1.35 / 10) * 10), fMax = Math.max(5, P.start);
     const x = (t) => L + (W - L - R) * t / tMax, y = (f) => Tp + (H - Tp - B) * (1 - f / fMax);
     const pts = []; for (let i = 0; i <= 120; i++) { const t = tMax * i / 120; pts.push([x(t), y(b.fee(P, t))]); }
@@ -198,15 +198,17 @@ function feePanel(b) {
         const svg = e.currentTarget.querySelector('svg'); if (!svg) return;
         const r = svg.getBoundingClientRect(), P = get();
         const tMax = Math.max(20, Math.ceil(P.seconds * 1.35 / 10) * 10);
-        const px = ((e.clientX - r.left) / r.width) * 560;
-        tSel = Math.round(Math.max(0, Math.min(tMax, ((px - 44) / (560 - 60)) * tMax)));
+        const px = ((e.clientX - r.left) / r.width) * W;
+        tSel = Math.round(Math.max(0, Math.min(tMax, ((px - 44) / (W - 60)) * tMax)));
         ft.value = tSel; this.update(el, P);
       });
     },
     update(el, P) {
       el.querySelector('#k-ft').max = Math.max(20, Math.ceil(P.seconds * 1.35 / 10) * 10);
       tSel = Math.min(tSel, +el.querySelector('#k-ft').max);
-      el.querySelector('[data-o="chart"]').innerHTML = chart(P);
+      const box = el.querySelector('[data-o="chart"]');
+      W = Math.round(Math.max(300, Math.min(560, (box.clientWidth || 560) - 8)));
+      box.innerHTML = chart(P);
       const f = b.fee(P, tSel), fee = buy * f / 100, burned = buy * Math.max(0, f - 1) / 100, base = buy * Math.min(f, 1) / 100;
       el.querySelector('[data-o="ft"]').textContent = `${tSel}s`;
       el.querySelector('[data-o="fb"]').textContent = `${buy} SOL`;
@@ -269,7 +271,7 @@ function customPanel() {
   return {
     html: () => `<div class="bd-hs"><button class="btn btn-chrome btn-sm" data-act="draft">Draft in Hookscript</button>
       <div class="bd-hsout" data-o="hs" aria-live="polite"></div>
-      <p class="bd-note">Hookscript can read the transfer, the wallet, the clock and the curve, and it can only refuse. No loops, no calls out, at most 8,000 CU. Every draft runs against 10,000 simulated trades before it can launch.</p></div>`,
+      <p class="bd-note">Hookscript can read the transfer, the wallet, the clock and the curve, and it can only refuse. No loops, no calls out, at most 8,000 CU. Every draft is fuzzed against 10,000 trades before it can launch.</p></div>`,
     mount(el, get) { el.querySelector('[data-act="draft"]').onclick = () => this.draft(el, get()); this.draft(el, get()); },
     async draft(el, P) {
       const my = ++seq, out = el.querySelector('[data-o="hs"]');

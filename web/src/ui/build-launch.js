@@ -92,7 +92,7 @@ export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft
       <div class="lp-side">
         <div class="img-drop${m.image ? ' has' : ''}${e.image ? ' bad' : ''}" data-drop>
           <input type="file" id="lf-img" class="sr" accept="image/png,image/jpeg,image/gif,image/webp" data-fk="lf-img">
-          ${m.image ? `<img src="${esc(m.image)}" alt="Coin image preview">` : `<span class="img-ph">${cube('custom', { size: 40, state: 'empty' })}<b>Coin image</b><span>PNG, JPG, GIF or WebP · up to 1 MB · shown square</span></span>`}
+          ${m.image ? `<img src="${esc(m.image)}" alt="Your coin image">` : `<span class="img-ph">${cube('custom', { size: 40, state: 'empty' })}<b>Coin image</b><span>PNG, JPG, GIF or WebP · up to 1 MB · shown square</span></span>`}
           <label for="lf-img" class="btn btn-glass btn-sm img-btn">${m.image ? 'Replace' : 'Upload image'}</label>
           ${m.image ? '<button class="btn btn-ghost btn-sm img-x" data-l="noimg">Remove</button>' : ''}
         </div>

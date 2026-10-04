@@ -184,7 +184,11 @@ app.innerHTML = `
 
 reveal();
 mountFlow(document.getElementById('flow'));
-load();
+load().catch(() => {
+  // the API is unreachable: keep the static page, say so where live data would be
+  document.getElementById('rack').innerHTML = '<p class="rack-down">The live feed is reconnecting. Refresh in a moment.</p>';
+  document.getElementById('trend').innerHTML = '';
+});
 
 async function load() {
   const [coins, stackSrc, stacks, lineage] = await Promise.all([api.coins({ sort: 'volume' }), api.coin('STACK'), api.stacks(), api.lineage('STACK')]);

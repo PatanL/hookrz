@@ -178,7 +178,7 @@ p { margin: 0; }
 
 /* enforcement badges: who enforces a block (see src/data/blocks.js ENFORCERS) */
 .enf { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--text-2); }
-.enf i { width: 8px; height: 8px; display: inline-block; clip-path: var(--notch); }
+.enf i { width: 8px; height: 8px; display: inline-block; flex: none; clip-path: polygon(0 2px, 2px 2px, 2px 0, 6px 0, 6px 2px, 100% 2px, 100% 6px, 6px 6px, 6px 100%, 2px 100%, 2px 6px, 0 6px); }
 .enf.hook i { background: var(--ice); box-shadow: 0 0 6px var(--ice); }
 .enf.curve i { background: var(--chrome-2); }
 .enf.crank i { background: var(--warn); }
@@ -277,7 +277,7 @@ input[type=range] { accent-color: var(--ice-2); width: 100%; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 100; padding: 12px 16px; background: var(--panel-solid); border: 1px solid var(--line-2); border-radius: var(--r-2); box-shadow: 0 20px 60px rgba(0,0,0,.6); font-size: 14px; max-width: calc(100vw - 32px); }
 .demo-tag { font-family: var(--font-pixel); font-size: 9.5px; letter-spacing: .08em; color: var(--warn); border: 1px solid rgba(255,197,107,.35); padding: 2px 6px; border-radius: 3px; text-transform: uppercase; white-space: nowrap; }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; } }
 
 /* ---------- modal (src/ui/chrome.js modal()) ---------- */
 .modal-back { position: fixed; inset: 0; z-index: 900; display: grid; place-items: center; padding: 16px; background: rgba(2,3,8,.66); backdrop-filter: blur(6px); animation: fadeIn .16s ease both; }

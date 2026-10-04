@@ -62,7 +62,7 @@ async function main() {
         </label>
         <div class="bk-search">
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="m11 11 3.5 3.5"/></svg>
-          <input class="input" id="fQ" type="search" placeholder="Search, or an error like 0x1773" aria-label="Search blocks" autocomplete="off">
+          <input class="input" id="fQ" type="search" placeholder="Search or 0x1773" aria-label="Search blocks" autocomplete="off">
         </div>
         <span class="bk-shown mono" id="shown" aria-live="polite"></span>
       </div>
@@ -89,7 +89,7 @@ async function main() {
       <button class="btn btn-glass btn-sm" id="clear">Clear filters</button>
     </div>
     <aside class="bk-cta panel">
-      <div><h3>Have a rule that isn't here?</h3><p class="muted">Describe it in English. The Custom block drafts it in Hookscript, measures its CU and runs it against 10,000 simulated trades.</p></div>
+      <div><h3>Have a rule that isn't here?</h3><p class="muted">Describe it in English. The Custom block writes it in Hookscript, measures its CU and fuzzes it against 10,000 trades before it can launch.</p></div>
       <div class="row wrap-row" style="gap:10px"><button class="btn btn-chrome" data-open="custom">Try the Custom block</button><a class="btn btn-glass" href="docs.html#hookscript">Read about Hookscript</a></div>
     </aside>
   </div>`;

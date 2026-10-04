@@ -2,7 +2,7 @@ import '../styles/base.css';
 import '../styles/blocks.css';
 import { mountChrome } from '../ui/chrome.js';
 import { asset, voxelSVG } from '../ui/voxel.js';
-import { FAMILIES, ENFORCERS, ENGINE, rentSol, hex } from '../data/blocks.js';
+import { FAMILIES, ENFORCERS, ENGINE, rentSol, hex, errName } from '../data/blocks.js';
 import { api } from '../api/client.js';
 import { esc, q } from '../core/format.js';
 import { card } from '../ui/blocks-card.js';
@@ -62,7 +62,7 @@ async function main() {
         </label>
         <div class="bk-search">
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="m11 11 3.5 3.5"/></svg>
-          <input class="input" id="fQ" type="search" placeholder="Search or 0x1773" aria-label="Search blocks" autocomplete="off">
+          <input class="input" id="fQ" type="search" placeholder="Search, or an error like 6003" aria-label="Search blocks" autocomplete="off">
         </div>
         <span class="bk-shown mono" id="shown" aria-live="polite"></span>
       </div>
@@ -97,7 +97,7 @@ async function main() {
   // ── filters
   const cards = [...app.querySelectorAll('.bk-card')];
   const byIdCard = Object.fromEntries(cards.map((c) => [c.dataset.id, c]));
-  const text = Object.fromEntries(blocks.map((b) => [b.id, [b.id, b.name, b.tagline, b.refuses, b.family, hex(b.code), b.code ?? '', ...b.params.map((p) => p.label), b.error ? b.error(Object.fromEntries(b.params.map((p) => [p.key, p.def]))) : ''].join(' ').toLowerCase()]));
+  const text = Object.fromEntries(blocks.map((b) => [b.id, [b.id, b.name, b.tagline, b.refuses, b.family, hex(b.code), b.code != null ? errName(b.code) : '', ...b.params.map((p) => p.label), b.error ? b.error(Object.fromEntries(b.params.map((p) => [p.key, p.def]))) : ''].join(' ').toLowerCase()]));
   const match = (b) => (!state.fam || b.family === state.fam)
     && (!state.enf || b.enforcedBy === state.enf || b.also === state.enf)
     && (!state.wallet || b.state === 'wallet')

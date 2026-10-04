@@ -1,5 +1,5 @@
 // Docs: API reference + live examples, error codes, the fee split.
-import { BLOCKS, PRESETS, defaults, hex, rentSol, ENGINE } from '../data/blocks.js';
+import { BLOCKS, PRESETS, defaults, hex, errName, rentSol, ENGINE } from '../data/blocks.js';
 import { ENDPOINTS, API_BASE, FEES } from '../api/contract.js';
 import { api } from '../api/client.js';
 import { fakeKey } from '../data/coins.js';
@@ -68,9 +68,9 @@ export const ENGINE_ERRORS = [
 export function errorTable() {
   const blocks = BLOCKS.filter((b) => b.code != null).sort((a, b) => a.code - b.code);
   return `<div class="tscroll"><table class="table dc-etable"><thead><tr><th>Code</th><th>Block</th><th>Message, default settings</th></tr></thead><tbody>
-    ${blocks.map((b) => `<tr><td class="mono code">${hex(b.code)}<small>${b.code}</small></td><td><a href="blocks.html?b=${b.id}">${esc(b.name)}</a></td><td class="msg">${esc(b.error(defaults(b.id)))}${b.id === 'custom' ? '<span class="dim"> (or the rule\'s own <code>because</code> message)</span>' : ''}</td></tr>`).join('')}
+    ${blocks.map((b) => `<tr><td class="mono code">${b.code}<small>${errName(b.code)}</small></td><td><a href="blocks.html?b=${b.id}">${esc(b.name)}</a></td><td class="msg">${esc(b.error(defaults(b.id)))}${b.id === 'custom' ? '<span class="dim"> (or the rule\'s own <code>because</code> message)</span>' : ''}</td></tr>`).join('')}
     <tr class="sep"><td colspan="3"><span class="pixel">Engine</span></td></tr>
-    ${ENGINE_ERRORS.map((e) => `<tr><td class="mono code">${hex(e.code)}<small>${e.code}</small></td><td class="mono">${e.name}</td><td class="msg">${esc(e.msg)}</td></tr>`).join('')}
+    ${ENGINE_ERRORS.map((e) => `<tr><td class="mono code">${e.code}<small>${e.name}</small></td><td class="mono">Engine</td><td class="msg">${esc(e.msg)}</td></tr>`).join('')}
   </tbody></table></div>`;
 }
 

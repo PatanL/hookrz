@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+cd "$(dirname "$0")"
+REFS=../src/hook-logo-v2.png,block-guard.png
+STYLE="Style: glossy 3D render of polished chrome and frosted glass with ice-blue glowing seams and soft blue-white reflections, cinematic cool electric-blue rim light, on a pure black background with a faint dark reflective floor. No text, no letters, no numbers, no logos, no watermark."
+P1="Wide cinematic banner composition, aspect ratio about 2:1. On the right half: the exact chrome-and-glass hook from the first attached image, large and slightly tilted, and hanging from its eye on a glowing glass cable is a short vertical chain of four chunky chrome voxel cube blocks exactly like the second attached image (segmented chrome panels with glowing ice-blue seams), each with a different glowing emblem: shield, bar chart, flame, crown. A few more cubes (droplet, plus sign in frosted glass) rest on the floor below with soft reflections. The entire left half of the frame is empty, pure black with only a faint blue haze, reserved for headline text. $STYLE"
+P2="Wide cinematic banner composition, aspect ratio about 2:1. A low long chrome rack on a dark reflective floor, seen in 3/4 view from the right, holding six chunky chrome voxel cube blocks exactly like the second attached image (segmented chrome panels, glowing ice-blue seams) with glowing emblems shield, bar chart, flame, droplet, crown, and a frosted-glass plus; above the rack, the exact chrome-and-glass hook from the first attached image floats, its point dipping into the rack as if lifting a block. Everything sits in the right 55% of the frame; the left 45% is empty pure black with a faint blue haze for headline text. $STYLE"
+./gen-ref.sh og-art-a.png "$REFS" "$P1" >> og.log 2>&1 &
+./gen-ref.sh og-art-b.png "$REFS" "$P2" >> og.log 2>&1 &
+wait; echo DONE >> og.log

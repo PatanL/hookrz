@@ -110,7 +110,7 @@ export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft
     const tok = `${(r.tokens / 1e6).toFixed(1)}M tokens · ${(r.share * 100).toFixed(2)}% of supply${r.fee > 1 ? ` · ${r.fee.toFixed(0)}% launch fee` : ''}`;
     if (r.ok) return `<span class="bc ok"><i class="dot"></i>Passes the stack · <span class="mono">${tok}</span></span>`;
     const b = byId[r.by];
-    return `<span class="bc bad"><i class="dot refuse"></i><b>${esc(b.name)}</b> would refuse this buy <span class="mono">${b.code != null ? `(0x${b.code.toString(16)})` : ''}</span>: ${esc(r.msg)}. ${r.max > 0.001 ? `Largest that passes now: <button class="link mono" data-l="maxbuy" data-v="${Math.floor(r.max * 1000) / 1000}">${(Math.floor(r.max * 1000) / 1000).toFixed(3)} SOL</button>` : 'Lower it or skip the creator buy.'}</span>`;
+    return `<span class="bc bad"><i class="dot refuse"></i><b>${esc(b.name)}</b> would refuse this buy <span class="mono">${b.code != null ? `(error ${b.code})` : ''}</span>: ${esc(r.msg)}. ${r.max > 0.001 ? `Largest that passes now: <button class="link mono" data-l="maxbuy" data-v="${Math.floor(r.max * 1000) / 1000}">${(Math.floor(r.max * 1000) / 1000).toFixed(3)} SOL</button>` : 'Lower it or skip the creator buy.'}</span>`;
   }
 
   function previewHTML(c) {

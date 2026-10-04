@@ -95,7 +95,7 @@ ${glow ? `<filter id="${id}g" x="-10%" y="-30%" width="120%" height="160%"><feGa
 /** The hookrz wordmark: chrome hook mark + voxel "hookrz". size = cube px. */
 export function wordmark({ size = 3.2, mark = true } = {}) {
   const vx = voxelSVG('hookrz', { cell: size, gap: size * .18, depth: .34, glow: false, title: 'hookrz' });
-  return `${mark ? `<img class="mark" src="${asset('img/hook-mark-128.png')}" alt="" width="34" height="34">` : ''}${vx}`;
+  return `${mark ? `<img class="mark" src="${asset('img/hook-mark-128.png')}" alt="" width="40" height="40">` : ''}${vx}`;
 }
 
 /** Resolve a public asset relative to the site root (works on / and on /hookrz/ subpaths). */

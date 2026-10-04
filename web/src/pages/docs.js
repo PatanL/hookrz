@@ -301,7 +301,7 @@ app.innerHTML = `
   </section>
 
   <section class="dc-sec" id="errors">
-    ${head('errors', 'Error codes', `A refused transfer fails with a custom program error from ${c(ENGINE.program)}. Wallets show it as ${c('custom program error: 0x1773')}; hookrz shows the sentence.`)}
+    ${head('errors', 'Error codes', `A refused transfer fails with a custom program error from ${c(ENGINE.program)}. The transaction fails with ${c('InstructionError: Custom(6003)')} and the program log names it (${c('MaxWalletExceeded')}); hookrz shows the sentence.`)}
     <div class="dc-wide">${errorTable()}</div>
   </section>
 

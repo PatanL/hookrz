@@ -2,7 +2,7 @@
 // the reference engine (engine.evaluate) against one transfer. Non-hook blocks get an explainer
 // of what the curve, keeper or mint does instead.
 import { cube } from './icons.js';
-import { byId, defaults, hex, ENFORCERS, familyOf } from '../data/blocks.js';
+import { byId, defaults, hex, errName, ENFORCERS, familyOf } from '../data/blocks.js';
 import { evaluate, largestAllowed } from '../engine/engine.js';
 import { SUPPLY } from '../engine/sim.js';
 import { FEES } from '../api/contract.js';
@@ -347,7 +347,7 @@ export function openDetail(id, { opener } = {}) {
         <div><dt>Checks</dt><dd>${CHECKS[id] ? CHECKS[id].map((x) => x + 's').join(' · ') : b.id === 'custom' ? 'what your rule says' : 'no transfers'}</dd></div>
         <div><dt>CU per transfer</dt><dd class="num">${b.cu ? b.cu.toLocaleString('en-US') : '0'}</dd></div>
         <div><dt>Extra accounts</dt><dd class="num">+${b.accts}</dd></div>
-        <div><dt>Error code</dt><dd class="num">${hex(b.code)}${b.code != null ? ` <span class="dim">(${b.code})</span>` : ''}</dd></div>
+        <div><dt>Error code</dt><dd class="num">${hex(b.code)}${b.code != null ? ` <span class="dim">${errName(b.code)}</span>` : ''}</dd></div>
         <div class="wide"><dt>State</dt><dd>${STATE_LABEL[b.state]} <span class="muted">${esc(STATE_LONG[b.state])}</span></dd></div>
         <div class="wide"><dt>Route</dt><dd>${b.route === 'record' ? 'Wallet record <span class="muted">A receiving wallet needs its record. The hookrz router opens it inside the buy; aggregator routes work once it exists.</span>' : 'Any <span class="muted">Works through the hookrz router, aggregators and wallet-to-wallet sends.</span>'}</dd></div>
       </dl>

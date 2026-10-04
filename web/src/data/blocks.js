@@ -365,8 +365,18 @@ export function defaults(id) {
   const b = byId[id];
   return Object.fromEntries(b.params.map((p) => [p.key, p.def]));
 }
-/** "0x1773" style hex for an error code. */
-export const hex = (n) => (n == null ? '—' : '0x' + n.toString(16));
+/** Anchor-style error names: the program log reads "Error Code: MaxWalletExceeded. Error Number: 6003". */
+export const ERR_NAMES = {
+  6000: 'NotInTransfer', 6001: 'SnipeWindow', 6002: 'BundleLimit', 6003: 'MaxWalletExceeded', 6004: 'RisingCapExceeded',
+  6005: 'SandwichLockout', 6006: 'Blocklisted', 6007: 'NoAllowlistPass', 6008: 'SellCapExceeded', 6009: 'SellCooldown',
+  6010: 'StillSettling', 6011: 'CircuitBreaker', 6012: 'MarketClosed', 6013: 'NotSeasoned', 6014: 'HourlyOutflowCap',
+  6015: 'LockInPhase', 6016: 'CreatorVesting', 6017: 'TokenGated', 6018: 'ChapterCap', 6128: 'CustomRuleRefused',
+  6141: 'MissingWalletRecord', 6142: 'HookLive', 6143: 'StackLocked',
+};
+export const errName = (n) => ERR_NAMES[n] ?? 'Custom';
+/** An error as Solana reports it: the transaction fails with InstructionError Custom(6003). Shown as the number. */
+export const hex = (n) => (n == null ? '—' : String(n));
+export const errNo = hex;
 
 /** Ready-made stacks the configurator offers as starting points. */
 export const PRESETS = [

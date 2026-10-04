@@ -108,6 +108,7 @@ function changed({ editor = true } = {}) {
   if (editor) renderEditor(c);
   $('sim').classList.toggle('stale', !!S.sim.res && S.sim.sig !== sig());
   if (S.sim.res) { const st = $('sim').querySelector('[data-stale]'); if (st) st.hidden = S.sim.sig === sig(); }
+  else renderSim(); // no results yet: the empty panel's button depends on whether the stack has blocks
   launch.stackChanged();
   save();
 }

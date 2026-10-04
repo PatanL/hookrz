@@ -226,7 +226,7 @@ export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft
       <div class="done-go">
         <a class="btn btn-chrome btn-lg" href="coin.html?t=${encodeURIComponent(d.ticker)}">Open $${esc(d.ticker)} ${ICON.arrow}</a>
         <button class="btn btn-glass btn-lg" data-l="copy" data-link="${esc(link)}">${ICON.copy} Copy link</button>
-        <a class="btn btn-glass btn-lg" target="_blank" rel="noopener" href="https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(link)}">${ICON.x} Share on X</a>
+        <a class="btn btn-glass btn-lg" target="_blank" rel="noopener" href="https://x.com/intent/tweet?text=${encodeURIComponent(text)}&via=hookrzfun&url=${encodeURIComponent(link)}">${ICON.x} Share on X</a>
       </div>
       <button class="link done-again" data-l="again">Build another coin</button>
     </div>`;

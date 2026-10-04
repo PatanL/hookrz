@@ -69,7 +69,7 @@ async function boot() {
           <a class="btn btn-chrome" href="build.html?remix=${encodeURIComponent(coin.ticker)}">${ICON.remix}Remix this stack</a>
           <div class="cn-share">
             <button class="btn btn-glass" id="share"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 10V2M4.5 5.5 8 2l3.5 3.5M3 9v5h10V9"/></svg>Share</button>
-            <a class="btn btn-glass cn-x" href="https://x.com/intent/tweet?text=${encodeURIComponent(`$${coin.ticker} runs a ${coin.stack.length}-block stack on hookrz.fun`)}&url=${encodeURIComponent(location.href)}" target="_blank" rel="noopener" aria-label="Post on X">${ICON.x}</a>
+            <a class="btn btn-glass cn-x" href="https://x.com/intent/tweet?text=${encodeURIComponent(`$${coin.ticker} runs a ${coin.stack.length}-block stack on hookrz.fun`)}&via=hookrzfun&url=${encodeURIComponent(location.href)}" target="_blank" rel="noopener" aria-label="Post on X">${ICON.x}</a>
           </div>
         </div>
       </div>

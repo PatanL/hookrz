@@ -4,6 +4,9 @@ import { wordmark, asset } from './voxel.js';
 import { ICON } from './icons.js';
 import { connect, pick, onWallet } from '../wallet/wallet.js';
 
+export const X_URL = 'https://x.com/hookrzfun';
+export const X_HANDLE = 'hookrzfun';
+
 export const NAV = [
   { id: 'coins', href: 'coins.html', label: 'Coins' },
   { id: 'stacks', href: 'stacks.html', label: 'Stacks' },
@@ -20,6 +23,7 @@ export function mountChrome(active) {
       <a class="brand" href="index.html" aria-label="hookrz home">${wordmark({ size: 3.4 })}</a>
       <nav class="nav" id="nav">${NAV.map((n) => `<a href="${n.href}" class="${n.id === active ? 'on' : ''}">${n.label}</a>`).join('')}</nav>
       <div class="header-actions">
+        <a class="x-link" href="${X_URL}" target="_blank" rel="noopener" aria-label="hookrz on X (@${X_HANDLE})" title="@${X_HANDLE} on X">${ICON.x}<span>@${X_HANDLE}</span></a>
         <button class="btn btn-glass btn-sm" data-wallet-btn>Connect wallet</button>
         <a class="btn btn-chrome btn-sm" href="build.html">Build a coin</a>
         <button class="btn btn-ghost btn-sm menu-btn" aria-label="Menu" id="menuBtn">${ICON.menu}</button>
@@ -37,7 +41,7 @@ export function mountChrome(active) {
       <p class="pixel" style="font-size:10px;color:var(--text-3)">BUILD. REMIX. OWN.</p></div>
     <div><h4>Make</h4><a href="build.html">Build a coin</a><a href="blocks.html">Block catalog</a><a href="build.html#presets">Presets</a></div>
     <div><h4>Explore</h4><a href="coins.html">Coins</a><a href="stacks.html">Stacks &amp; remixes</a><a href="docs.html">Docs</a></div>
-    <div><h4>Under the hood</h4><a href="docs.html#engine">The engine</a><a href="docs.html#api">API contract</a><a href="docs.html#trust">Trust model</a></div>
+    <div><h4>Follow</h4><a href="${X_URL}" target="_blank" rel="noopener">X · @${X_HANDLE}</a><h4 style="margin-top:20px">Under the hood</h4><a href="docs.html#engine">The engine</a><a href="docs.html#api">API contract</a><a href="docs.html#trust">Trust model</a></div>
   </div><hr class="hr" style="margin:32px 0 18px"><div class="row between wrap-row" style="gap:12px"><span>© 2026 hookrz · hookrz.fun</span><span class="mono">Token-2022 transfer hooks · Meteora DBC</span></div></div>`;
   document.body.append(foot);
 
@@ -50,7 +54,7 @@ export function bindWalletButtons(root = document) {
   onWallet((addr) => {
     for (const b of btns) {
       if (addr) { b.innerHTML = `<span class="dot"></span><span class="mono">${addr.slice(0, 4)}…${addr.slice(-4)}</span>`; b.title = 'Wallet: switch, copy or disconnect'; }
-      else { b.textContent = b.dataset.label ?? 'Connect wallet'; b.title = ''; }
+      else { if (b.dataset.label) b.textContent = b.dataset.label; else b.innerHTML = '<span>Connect<span class="hide-sm"> wallet</span></span>'; b.title = ''; }
     }
   });
   for (const b of btns) b.onclick = () => pick().then((h) => toast(`Connected ${h.name}`)).catch(() => {});

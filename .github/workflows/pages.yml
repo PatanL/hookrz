@@ -1,7 +1,6 @@
 name: Deploy site
+# Production hosting is Vercel (project root: web/). This GitHub Pages build is a manual fallback only.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -23,10 +22,11 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      # HOLDING: serve the splash in /holding until the full site is ready; then restore npm ci + build + web/dist
+      - run: npm ci
+      - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: holding
+          path: web/dist
   deploy:
     needs: build
     runs-on: ubuntu-latest

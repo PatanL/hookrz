@@ -14,6 +14,8 @@ import { mountRack } from '../ui/home-rack.js';
 import { mountFlow } from '../ui/home-flow.js';
 import { mountLineage } from '../ui/home-lineage.js';
 
+let io; // reveal-on-scroll observer (declared before the first reveal() call)
+
 mountChrome('');
 
 const ARROW = ICON.arrow;
@@ -306,7 +308,6 @@ function coinCard(c, i) {
 function familyOfBlock(id) { return byId[id]?.family ?? 'custom'; }
 
 /** Reveal-on-scroll. Content stays visible for reduced motion, automation and crawlers. */
-let io;
 function reveal(root = document) {
   const els = [...root.querySelectorAll('.rv:not(.in)')];
   if (root !== document && root.classList?.contains('rv')) els.push(root);
@@ -316,10 +317,10 @@ function reveal(root = document) {
     if (navigator.webdriver) document.querySelectorAll('img[loading=lazy]').forEach((i) => { i.loading = 'eager'; });
     return;
   }
-  document.documentElement.classList.add('rv-on');
   io ??= new IntersectionObserver((entries) => {
     for (const e of entries) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
   }, { rootMargin: '0px 0px -6% 0px', threshold: 0.06 });
   els.forEach((e) => io.observe(e));
+  document.documentElement.classList.add('rv-on'); // hide-until-revealed only once the observer is watching
 }
 

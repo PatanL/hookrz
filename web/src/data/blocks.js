@@ -333,7 +333,7 @@ export const BLOCKS = [
     id: 'custom', code: 0x17f0, family: 'custom', name: 'Custom Block', enforcedBy: 'hook', state: 'wallet', route: 'record', cu: 5000, accts: 2, unreviewed: true,
     tagline: 'Say the rule in English. hookrz drafts it in Hookscript.',
     refuses: 'Whatever your Hookscript says. Hookscript is a small rule language the engine runs inside its own budget: comparisons over amount, balances, time, price and wallet counters. It has no loops and no calls out, and it can only refuse. Each draft is fuzzed against 10,000 generated trades before you can launch it.',
-    params: [{ key: 'prompt', label: 'Your rule', text: true, def: 'Wallets can\'t sell more than they bought in the last hour' }],
+    params: [{ key: 'prompt', label: 'Your rule', text: true, def: 'No single sell over a quarter of your bag in your first 2h' }],
     summary: () => 'Hookscript',
     error: () => 'Refused by the coin\'s custom rule',
     check: () => false,

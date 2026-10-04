@@ -276,7 +276,7 @@ function customPanel() {
     async draft(el, P) {
       const my = ++seq, out = el.querySelector('[data-o="hs"]');
       out.innerHTML = `<div class="bd-hsload"><span></span><span></span><span></span><em>Drafting and fuzzing…</em></div>`;
-      const d = await api.draftHookscript(P.prompt || 'Wallets can\'t sell more than they bought in the last hour');
+      const d = await api.draftHookscript(P.prompt || 'No single sell over a quarter of your bag in your first 2h');
       if (my !== seq || !out.isConnected) return;
       out.innerHTML = `<pre class="hs-code"><code>${tintHookscript(d.script)}</code></pre>
         <div class="bd-hsstats">

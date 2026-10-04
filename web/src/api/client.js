@@ -210,7 +210,8 @@ function draftDemo(prompt) {
     script = `rule "no buys after a ${n}% pump"\nwhen transfer.kind == buy\nlet move = curve.price / curve.price_at(ago: 10m) - 1\nrefuse if move > ${n} / 100\n  because "Price is up more than ${n}% in 10 minutes; buys pause"`;
     ops = 8; cu = 3900; refusalsPct = 4.2;
   } else {
-    script = `rule "${prompt.slice(0, 48).replace(/"/g, "'")}"\nwhen transfer.kind == sell\nlet held = clock.now - wallet.first_receipt\nrefuse if held < ${n}h and transfer.amount > wallet.balance * 0.25\n  because "Sell at most a quarter of your bag in your first ${n}h"`;
+    const title = prompt.length > 60 ? prompt.slice(0, 59).replace(/\s+\S*$/, '') + '…' : prompt;
+    script = `rule "${title.replace(/"/g, "'")}"\nwhen transfer.kind == sell\nlet held = clock.now - wallet.first_receipt\nrefuse if held < ${n}h and transfer.amount > wallet.balance * 0.25\n  because "No single sell over a quarter of your bag in your first ${n}h"`;
     ops = 10; cu = 3600; refusalsPct = 7.8;
   }
   return { prompt, script, ops, cu, fuzz: { trades: 10000, refusedPct: refusalsPct, panics: 0, maxCu: Math.round(cu * 1.18) }, reviewed: false };

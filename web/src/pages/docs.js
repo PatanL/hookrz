@@ -321,7 +321,7 @@ fillLater.push(apiExamples(app.querySelector('#apiEx')).then(({ quote, launch })
   app.querySelector('#txBar').innerHTML = txBar(launch.txBytes, launch.txLimit);
   app.querySelector('#quoteEx').innerHTML = quotePanel(quote);
 }));
-fillLater.push(api.draftHookscript('Wallets can\'t sell more than they bought in the last hour').then((d) => {
+fillLater.push(api.draftHookscript('No single sell over a quarter of your bag in your first 2h').then((d) => {
   app.querySelector('#hsEx').innerHTML = `<div class="hs-card panel"><div class="hs-top"><span class="pixel">Draft</span><p>“${esc(d.prompt)}”</p><span class="chip warnchip">Unreviewed</span></div>
     <pre class="hs-code"><code>${tintHookscript(d.script)}</code></pre>
     <dl class="hs-stats"><div><dt>Ops</dt><dd class="num">${d.ops}</dd></div><div><dt>CU</dt><dd class="num">${n(d.cu)}<small> / 8,000</small></dd></div><div><dt>Fuzzed</dt><dd class="num">${n(d.fuzz.trades)}</dd></div><div><dt>Refused</dt><dd class="num">${d.fuzz.refusedPct}%</dd></div><div><dt>Panics</dt><dd class="num">${d.fuzz.panics}</dd></div><div><dt>Worst CU</dt><dd class="num">${n(d.fuzz.maxCu)}</dd></div></dl>

@@ -167,7 +167,7 @@ export function rackHTML(S, c) {
 
 // ───────────────────────── editor ─────────────────────────
 const EXAMPLES = [
-  'Wallets can\'t sell more than they bought in the last hour',
+  'No single sell over a quarter of your bag in your first 2h',
   'No buys after a 30% pump in 10 minutes',
   'The curve is closed on weekends',
 ];

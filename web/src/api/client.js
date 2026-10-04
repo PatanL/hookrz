@@ -149,7 +149,8 @@ export const api = {
     const coin = {
       ticker: meta.ticker.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10), name: meta.name, creator: 'you', minutesAgo: 0, progress: 0.002, parent,
       desc: meta.desc || '', stack: normalize(stack), local: true, image: meta.image ?? null,
-      stats: { mint: prepared?.mint ?? fakeKey(Date.now() % 997, 'hk'), mcapUsd: curveMcapSol(0.002) * SOL_USD, vol24Usd: 0, change24: 0, holders: 1, trades: 1, checked: 1, refused: 0, remixes: 0, royaltiesSol: 0 },
+      stats: { mint: null, // nothing went on chain in this mode, so there is no contract address to show
+       mcapUsd: curveMcapSol(0.002) * SOL_USD, vol24Usd: 0, change24: 0, holders: 1, trades: 1, checked: 1, refused: 0, remixes: 0, royaltiesSol: 0 },
     };
     const list = localLaunches().filter((c) => c.ticker !== coin.ticker);
     try { localStorage.setItem(LS, JSON.stringify([coin, ...list].slice(0, 20))); } catch { /* private mode: coin lives for this page only */ }

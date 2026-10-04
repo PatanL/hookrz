@@ -23,11 +23,10 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci
-      - run: npm run build
+      # HOLDING: serve the splash in /holding until the full site is ready; then restore npm ci + build + web/dist
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: web/dist
+          path: holding
   deploy:
     needs: build
     runs-on: ubuntu-latest

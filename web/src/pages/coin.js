@@ -7,9 +7,10 @@ import { avatar } from '../ui/avatar.js';
 import { byId } from '../data/blocks.js';
 import { FEES } from '../api/contract.js';
 import { api } from '../api/client.js';
-import { SUPPLY } from '../engine/sim.js';
+import { SUPPLY, CURVE } from '../engine/sim.js';
 import { usd, pctS, num, ago, esc, q } from '../core/format.js';
-import { installTips, handleOf, shortKey, copyText, chg, sol, SOL_USD } from '../ui/coin-shared.js';
+import { installTips, handleOf, shortKey, copyText, chg, sol, SOL_USD, testChip } from '../ui/coin-shared.js';
+import { presetCards } from '../ui/coin-presets.js';
 import { lineageTree } from '../ui/coin-lineage.js';
 import { buildHistory, mountChart, TIMEFRAMES } from '../ui/coin-chart.js';
 import { mountStackPanel } from '../ui/coin-stackpanel.js';
@@ -20,7 +21,7 @@ import { pos, onPos } from '../ui/coin-position.js';
 mountChrome('coins');
 installTips();
 const app = document.getElementById('app');
-const T = (q('t') || 'STACK').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12) || 'STACK';
+let T = (q('t') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
 const GRAD_SOL = 85;
 const loadedAt = Date.now();
 
@@ -28,6 +29,12 @@ boot();
 
 async function boot() {
   app.innerHTML = `<section class="cn-top"><div class="wrap"><div class="cn-skel"><span></span><span></span><span></span></div></div></section>`;
+  if (!T) { // no ticker in the link: open the top coin, or say nothing has launched
+    const top = (await api.coins())[0];
+    if (!top) return noCoins();
+    T = top.ticker;
+    history.replaceState(null, '', `${location.pathname}?t=${encodeURIComponent(T)}`);
+  }
   const coin = await api.coin(T);
   if (!coin) return notFound();
   document.title = `$${coin.ticker} · ${coin.name} · hookrz`;
@@ -53,14 +60,15 @@ async function boot() {
           <div class="cn-l1">
             <h1>${esc(coin.name)}</h1>
             <span class="cn-tk">$${esc(coin.ticker)}</span>
+            ${testChip(coin)}
             ${grad ? '<span class="chip solid">Graduated</span>' : '<span class="chip ice"><span class="dot ice"></span>On curve</span>'}
           </div>
           <div class="cn-l2">
             <span>by <b>${esc(handleOf(coin))}</b></span>
             <span class="sep"></span>
             <span>launched ${ago(coin.minutesAgo)}</span>
-            <span class="sep"></span>
-            <span class="cn-mint">mint <span class="mono" title="${esc(coin.mint)}">${shortKey(coin.mint)}</span><button class="icon-btn" id="copyMint" aria-label="Copy mint address">${ICON.copy}</button></span>
+            ${coin.mint ? `<span class="sep"></span>
+            <span class="cn-mint">mint <span class="mono" title="${esc(coin.mint)}">${shortKey(coin.mint)}</span><button class="icon-btn" id="copyMint" aria-label="Copy mint address">${ICON.copy}</button></span>` : ''}
             ${parent ? `<span class="sep"></span><a class="chip ice cn-parent" href="coin.html?t=${encodeURIComponent(parent.ticker)}">Remix of $${esc(parent.ticker)}</a>` : ''}
           </div>
           ${coin.desc ? `<p class="cn-desc">${esc(coin.desc)}</p>` : ''}
@@ -110,7 +118,7 @@ async function boot() {
   </section>`;
 
   const $ = (s) => app.querySelector(s);
-  $('#copyMint').onclick = (e) => { copyText(coin.mint, e.currentTarget, ICON.check); toast('Mint address copied'); };
+  if ($('#copyMint')) $('#copyMint').onclick = (e) => { copyText(coin.mint, e.currentTarget, ICON.check); toast('Mint address copied'); };
   $('#share').onclick = async () => {
     const url = location.href;
     if (navigator.share && matchMedia('(pointer: coarse)').matches) { try { await navigator.share({ title: `$${coin.ticker} on hookrz`, url }); return; } catch { /* closed */ } }
@@ -179,7 +187,7 @@ function statCells(c) {
 function renderLineage(el, coin, tree, parent, children) {
   const author = handleOf(coin);
   el.innerHTML = `
-    <div class="ph"><h3>Remix lineage <span class="pk">${tree ? countNodes(tree) : 1} coins on this family of stacks</span></h3><a class="btn btn-glass btn-sm" href="stacks.html">All stacks</a></div>
+    <div class="ph"><h3>Remix lineage <span class="pk">${plural(tree ? countNodes(tree) : 1, 'coin')} on this stack family</span></h3><a class="btn btn-glass btn-sm" href="stacks.html">All stacks</a></div>
     <div class="cn-lin-body">
       <p class="cn-roy">${cube('crown', { size: 26 })}<span><b>${esc(author)}</b> earns 10% of the trade fee on remixes of this stack, one level up.${parent ? ` This coin remixes <a href="coin.html?t=${encodeURIComponent(parent.ticker)}" class="mono">$${esc(parent.ticker)}</a>, so 10% of its fee goes to <b>${esc(handleOf(parent))}</b>.` : ' This is an original stack, so its creator keeps that 10% too.'}</span></p>
       ${tree ? lineageTree(tree, { current: coin.ticker }) : ''}
@@ -190,9 +198,12 @@ function renderLineage(el, coin, tree, parent, children) {
     </div>`;
 }
 const countNodes = (n) => 1 + n.children.reduce((a, c) => a + countNodes(c), 0);
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
 function renderHolders(el, coin, holdersIn) {
-  const holders = [...holdersIn].sort((a, b) => b.share - a.share).slice(0, 10);
+  const holders = coin.local && coin.holders <= 1
+    ? [{ wallet: '', share: Math.max(1e-6, coin.progress * (CURVE.vTok0 - CURVE.gradTok) / SUPPLY), creator: true }]
+    : [...holdersIn].sort((a, b) => b.share - a.share).slice(0, Math.max(1, Math.min(10, coin.holders ?? 10)));
   const max = Math.max(...holders.map((h) => h.share));
   const p = pos(coin.ticker);
   const crown = coin.stack.some((s) => s.id === 'diamond-tiers');
@@ -202,12 +213,13 @@ function renderHolders(el, coin, holdersIn) {
       <thead><tr><th>#</th><th>Wallet</th><th>Share</th></tr></thead>
       <tbody>${holders.map((h, i) => `<tr>
         <td class="num dim">${i + 1}</td>
-        <td class="cn-hw"><span class="mono">${shortKey(h.wallet)}</span>${h.tier === 'crown' ? `<span class="chip ice cn-crown" data-tip="${crown ? 'Diamond Tiers crown: this wallet has never sold' : 'Crown tier: this wallet has never sold'}">${EMBLEM.crown}Crown</span>` : ''}</td>
+        <td class="cn-hw">${h.creator ? `<span class="mono">${esc(handleOf(coin))}</span><span class="chip">Creator</span>` : `<span class="mono">${shortKey(h.wallet)}</span>`}${h.tier === 'crown' && crown ? `<span class="chip ice cn-crown" data-tip="Diamond Tiers crown: this wallet has never sold">${EMBLEM.crown}Crown</span>` : ''}</td>
         <td><span class="cn-share"><span class="cn-sbar"><i style="width:${(h.share / max) * 100}%"></i></span><span class="num">${(h.share * 100).toFixed(2)}%</span></span></td>
       </tr>`).join('')}
       ${p.tokens > 0 ? `<tr class="you"><td class="num">—</td><td><span class="chip solid">You</span></td><td><span class="cn-share"><span class="cn-sbar"><i style="width:${Math.min(100, (p.tokens / SUPPLY / max) * 100)}%"></i></span><span class="num">${(p.tokens / SUPPLY * 100).toFixed(3)}%</span></span></td></tr>` : ''}
       </tbody>
-    </table>`;
+    </table>
+    ${holders[0]?.creator ? `<p class="cn-hnote dim">Only the creator's launch buy so far. Wallets show up here as they buy $${esc(coin.ticker)}.</p>` : ''}`;
 }
 
 function renderFees(el, coin, parent, children) {
@@ -237,9 +249,29 @@ async function notFound() {
       <div class="cn-nf-cubes">${cube('x', { size: 40, state: 'empty' })}${cube('guard', { size: 40 })}${cube('x', { size: 40, state: 'empty' })}</div>
       <span class="eyebrow">No coin at this ticker</span>
       <h1 class="cn-nf-h">$${esc(T)} hasn't launched</h1>
-      <p class="lede">Nothing on hookrz trades under $${esc(T)}. It may use a different ticker, or it's yours to build.</p>
-      <div class="row wrap-row" style="justify-content:center"><a class="btn btn-chrome" href="build.html">Build $${esc(T)}</a><a class="btn btn-glass" href="coins.html">Browse coins</a></div>
-      <div class="cn-nf-list"><span class="pk">Trading now</span>${all.slice(0, 6).map((c) => `<a href="coin.html?t=${encodeURIComponent(c.ticker)}">${avatar(c, 26)}<span class="mono">$${esc(c.ticker)}</span><span class="dim num">${usd(c.mcapUsd)}</span></a>`).join('')}</div>
+      <p class="lede">Nothing on hookrz trades under $${esc(T)}. Check the ticker, or build it.</p>
+      <div class="cn-nf-cta"><a class="btn btn-chrome" href="build.html">Build a coin</a><a class="btn btn-glass" href="coins.html">Browse coins</a></div>
+      ${all.length
+    ? `<div class="cn-nf-list"><span class="pk">Launched coins</span>${all.slice(0, 6).map((c) => `<a href="coin.html?t=${encodeURIComponent(c.ticker)}">${avatar(c, 26)}<span class="mono">$${esc(c.ticker)}</span>${testChip(c)}<span class="dim num">${usd(c.mcapUsd)}</span></a>`).join('')}</div>`
+    : ''}
     </div>
+    ${all.length ? '' : starters()}
   </div></section>`;
 }
+
+/** coin.html with no ticker and nothing launched yet. */
+function noCoins() {
+  document.title = 'Coins · hookrz';
+  app.innerHTML = `<section class="cn-nf"><div class="wrap">
+    <div class="panel cn-nf-box">
+      <div class="cn-nf-cubes">${cube('x', { size: 40, state: 'empty' })}${cube('x', { size: 40, state: 'empty' })}${cube('x', { size: 40, state: 'empty' })}</div>
+      <span class="eyebrow">Coin page</span>
+      <h1 class="cn-nf-h">No coins yet</h1>
+      <p class="lede">Every coin gets a page here with its chart, its stack and every transfer the engine checks. Launch the first one.</p>
+      <div class="cn-nf-cta"><a class="btn btn-chrome" href="build.html">Build a coin</a><a class="btn btn-glass" href="coins.html">Coins</a></div>
+    </div>
+    ${starters()}
+  </div></section>`;
+}
+
+const starters = () => `<div class="cn-nf-starters"><div class="cn-nf-sh"><h3>Starter stacks</h3><span class="dim">Open one in Build, tune it, launch.</span></div>${presetCards({ compact: true })}</div>`;

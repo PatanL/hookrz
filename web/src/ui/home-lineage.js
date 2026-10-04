@@ -1,11 +1,29 @@
-// Home: the remix tree from api.lineage(). Desktop lays generations out in columns with curved
-// cables between parent and child; narrow screens get an indented list with elbow connectors.
-import { cube } from './icons.js';
-import { avatar } from './avatar.js';
-import { byId } from '../data/blocks.js';
-import { usd, esc } from '../core/format.js';
+// Home: how remixing works, drawn from real catalog data. A preset is the root; each child is the same
+// stack with one change (a block added or a setting tuned), shown as a stack diff with its cube row.
+// Desktop lays generations out in columns with curved cables between parent and child; narrow screens
+// get an indented list with elbow connectors.
+import { cube, ICON } from './icons.js';
+import { byId, ENFORCERS } from '../data/blocks.js';
+import { budget, normalize } from '../engine/engine.js';
+import { diffStacks } from '../api/client.js';
+import { esc } from '../core/format.js';
 
 const name = (id) => byId[id]?.name ?? id;
+
+/** A preset plus example remixes: [{ title, blurb, change: { add } | { tune: [id, params] }, href }]. */
+export function remixTree(preset, remixes) {
+  const base = normalize(preset.slots.map(([id, params]) => ({ id, params })));
+  const root = { title: preset.name, kind: 'Preset', blurb: preset.blurb, stack: base, href: `build.html?preset=${preset.id}`, go: 'Start from it', children: [] };
+  root.children = remixes.map((r) => {
+    let stack = base.map((s) => ({ id: s.id, params: { ...s.params } }));
+    if (r.change.add) stack.push({ id: r.change.add, params: {} });
+    if (r.change.tune) { const [id, p] = r.change.tune; stack = stack.map((s) => (s.id === id ? { id, params: { ...s.params, ...p } } : s)); }
+    stack = normalize(stack);
+    const target = r.change.add ?? r.change.tune?.[0];
+    return { title: r.title, kind: 'Remix', blurb: r.blurb, stack, parent: base, diff: diffStacks(base, stack), href: `build.html?preset=${preset.id}&add=${target}`, go: 'Remix this', children: [] };
+  });
+  return root;
+}
 
 export function mountLineage(el, root) {
   // flatten: rows by leaf order, columns by generation
@@ -57,20 +75,36 @@ export function mountLineage(el, root) {
   new ResizeObserver(draw).observe(grid);
 }
 
+/** The one setting a tune changed, as "Snipe Shield tuned to 0.25%". */
+function tuneLine(id, before, after) {
+  const b = byId[id];
+  const p = b?.params.find((x) => before[x.key] !== after[x.key]);
+  if (!p) return `${esc(name(id))} tuned`;
+  const v = (p.fmt ? p.fmt(after[p.key]) : String(after[p.key])).replace(/ of supply$/, '');
+  return `${esc(name(id))} tuned to <span class="mono">${esc(v)}</span>`;
+}
+
 function nodeHTML(me) {
-  const { coin: c, diff } = me.n;
-  const gen = me.depth === 0 ? 'Original' : `Gen ${me.depth + 1}`;
-  let lines;
-  if (me.depth === 0) lines = `<li class="orig">Original stack · ${c.stack.length} blocks</li>`;
-  else if (!diff.added.length && !diff.removed.length && !diff.tuned.length) lines = `<li class="same">Remixed as is</li>`;
-  else lines = [
-    ...diff.added.map((id) => `<li class="add"><i>+</i>${esc(name(id))}</li>`),
-    ...diff.removed.map((id) => `<li class="del"><i>−</i>${esc(name(id))}</li>`),
-    diff.tuned.length ? `<li class="tune"><i>~</i>Tuned ${diff.tuned.map((id) => esc(name(id))).join(', ')}</li>` : '',
-  ].join('');
-  return `<a class="lnode nr${me.depth === 0 ? ' root' : ''}" href="coin.html?t=${esc(c.ticker)}" style="--col:${me.depth + 1};--row:${me.row + 1};--span:${me.span};--depth:${me.depth}">
-    <div class="lnode-top">${avatar(c, 36)}<div class="lnode-id"><b>$${esc(c.ticker)}</b><small>by ${esc(c.creatorInfo?.handle ?? c.creator)}</small></div><span class="lnode-gen pixel">${gen}</span></div>
-    <div class="lnode-stack">${c.stack.map((s) => cube(byId[s.id]?.family ?? 'custom', { size: 18 })).join('')}<span class="lnode-vol mono">${usd(c.vol24Usd)} <span class="dim">24h</span></span></div>
+  const n = me.n;
+  const root = me.depth === 0;
+  const d = n.diff ?? { added: [], removed: [], tuned: [] };
+  const before = Object.fromEntries((n.parent ?? []).map((s) => [s.id, s.params]));
+  const lines = root
+    ? n.stack.map((s) => { const b = byId[s.id]; return `<li class="orig"><span class="enf ${b.enforcedBy}" title="${esc(ENFORCERS[b.enforcedBy].long)}"><i></i></span>${esc(b.name)}<em class="mono">${esc(b.summary(s.params))}</em></li>`; }).join('')
+    : [
+      ...d.added.map((id) => `<li class="add"><i>+</i>${esc(name(id))}</li>`),
+      ...d.removed.map((id) => `<li class="del"><i>−</i>${esc(name(id))}</li>`),
+      ...d.tuned.map((id) => `<li class="tune"><i>~</i><span>${tuneLine(id, before[id], n.stack.find((s) => s.id === id).params)}</span></li>`),
+    ].join('');
+  const cubes = n.stack.map((s) => {
+    const st = d.added.includes(s.id) ? ' add' : d.tuned.includes(s.id) ? ' tune' : '';
+    return `<span class="lc${st}">${cube(byId[s.id]?.family ?? 'custom', { size: 20, title: name(s.id) })}</span>`;
+  }).join('');
+  const b = budget(n.stack);
+  return `<a class="lnode nr${root ? ' root' : ''}" href="${esc(n.href)}" style="--col:${me.depth + 1};--row:${me.row + 1};--span:${me.span};--depth:${me.depth}">
+    <div class="lnode-top"><span class="lnode-stack">${cubes}</span><span class="lnode-gen pixel">${n.kind}</span></div>
+    <div class="lnode-id"><b>${esc(n.title)}</b><small>${esc(n.blurb)}</small></div>
     <ul class="lnode-diff">${lines}</ul>
+    <div class="lnode-foot"><span class="mono dim">${n.stack.length} blocks · ${b.cu.toLocaleString('en-US')} CU</span><span class="lnode-go">${n.go} ${ICON.arrow}</span></div>
   </a>`;
 }

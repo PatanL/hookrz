@@ -1,9 +1,9 @@
-// Home hero: the LIVE RACK. A coin's stack sits in the engine's six slots; every transfer from the
-// live stream rides the rail under the slots, lights each block it passes and either lands at the end
-// or stops at the block that refused it (coral, with the block's error message and custom error code).
+// Home hero: the LIVE RACK. The Fair Launch preset sits in the engine's six slots; every transfer runs
+// along the rail under the slots, lights each block it passes and either lands at the end or stops at
+// the block that refused it (coral, with the block's message and its custom error number).
 import { cube, ICON } from './icons.js';
-import { avatar } from './avatar.js';
-import { byId, hex, ENGINE, ENFORCERS } from '../data/blocks.js';
+import { byId, hex, errName, ENGINE, ENFORCERS } from '../data/blocks.js';
+import { budget } from '../engine/engine.js';
 import { api } from '../api/client.js';
 import { short } from '../data/coins.js';
 import { num, esc } from '../core/format.js';
@@ -13,24 +13,22 @@ const MAX_IN_FLIGHT = 3;
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /**
- * live:   the coin whose transfers stream through the rack (shaped like api.coin()).
- * source: the coin whose stack is in the slots (the stack's author), may equal live.
+ * preset: an entry of PRESETS; its stack goes in the slots and the transfers run through it.
  * onVerdict(ev): called once per transfer as its verdict lands on screen.
  */
-export function mountRack(el, { live, source, onVerdict }) {
-  const stack = source.stack;
+export function mountRack(el, { preset, onVerdict }) {
+  const stack = preset.slots.map(([id, params]) => ({ id, params }));
   const slots = Array.from({ length: ENGINE.maxSlots }, (_, i) => (stack[i] ? { ...byId[stack[i].id], params: stack[i].params } : null));
   const hookCount = slots.filter((b) => b?.enforcedBy === 'hook').length;
-  const author = source.creatorInfo?.handle ?? source.creator;
-  const remix = live.ticker !== source.ticker;
+  const cu = budget(stack).cu;
+  const href = `build.html?preset=${encodeURIComponent(preset.id)}`;
 
   el.innerHTML = `
   <div class="rack-head">
-    <a class="rack-coin" href="coin.html?t=${esc(live.ticker)}">${avatar(live, 40)}<span><b>$${esc(live.ticker)}</b><small>${esc(live.name)}</small></span></a>
-    ${remix ? `<a class="chip rack-remix" href="coin.html?t=${esc(source.ticker)}">${ICON.remix}<span>Remix of $${esc(source.ticker)}</span></a>` : ''}
-    <span class="rack-live"><i></i>Live</span>
+    <a class="rack-coin" href="${href}"><span class="rack-mark">${cube('guard', { size: 40 })}</span><span><b>${esc(preset.name)} stack</b><small>${esc(preset.name)} · every transfer through the engine</small></span></a>
+    <span class="rack-live"><i></i>Running</span>
   </div>
-  <p class="rack-sub">Stack <a href="coin.html?t=${esc(source.ticker)}">${esc(source.name)}</a> by ${esc(author)}<span class="sep"></span><span class="num">${stack.length}</span>/<span class="num">${ENGINE.maxSlots}</span> slots<span class="sep"></span><span class="num">${source.budget.cu.toLocaleString('en-US')}</span> CU</p>
+  <p class="rack-sub"><span class="mono">${ENGINE.program}</span><span class="sep"></span><span class="num">${stack.length}</span>/<span class="num">${ENGINE.maxSlots}</span> slots<span class="sep"></span><span class="num">${cu.toLocaleString('en-US')}</span> CU<a class="rack-use" href="${href}">Launch with this stack ${ICON.arrow}</a></p>
   <div class="rack-chassis">
     <div class="rack-bays">
       ${slots.map((b, i) => `
@@ -44,7 +42,7 @@ export function mountRack(el, { live, source, onVerdict }) {
       <div class="rack-label${b ? '' : ' empty'}">
         <span class="slot-n pixel">${String(i + 1).padStart(2, '0')}</span>
         <span class="slot-name">${b ? esc(b.name) : 'Open slot'}</span>
-        <span class="slot-code">${b ? (b.code != null ? `<span class="mono">${hex(b.code)}</span>` : `<span class="enf ${b.enforcedBy}"><i></i>${ENFORCERS[b.enforcedBy].name}</span>`) : '<span class="dim">—</span>'}</span>
+        <span class="slot-code">${b ? (b.code != null ? `<span class="mono" title="${esc(errName(b.code))}">${hex(b.code)}</span>` : `<span class="enf ${b.enforcedBy}"><i></i>${ENFORCERS[b.enforcedBy].name}</span>`) : '<span class="dim">—</span>'}</span>
       </div>`).join('')}
     </div>
     <div class="rack-ends pixel" aria-hidden="true"><span>Transfer in</span><span>Lands</span></div>
@@ -55,9 +53,9 @@ export function mountRack(el, { live, source, onVerdict }) {
     <div class="rv-l2">&nbsp;</div>
   </div>
   <div class="rack-counters">
-    <div><span class="pixel">Transfers checked</span><b class="num" data-c="checked">${live.checked.toLocaleString('en-US')}</b></div>
-    <div><span class="pixel">Refused</span><b class="num refuse" data-c="refused">${live.refused.toLocaleString('en-US')}</b></div>
-    <div><span class="pixel">Refusal rate</span><b class="num" data-c="rate">${rate(live.refused, live.checked)}</b></div>
+    <div><span class="pixel">Transfers checked</span><b class="num" data-c="checked">0</b></div>
+    <div><span class="pixel">Refused</span><b class="num refuse" data-c="refused">0</b></div>
+    <div><span class="pixel">Refusal rate</span><b class="num" data-c="rate">0%</b></div>
   </div>`;
 
   const bays = [...el.querySelectorAll('.rack-slot')];
@@ -68,7 +66,7 @@ export function mountRack(el, { live, source, onVerdict }) {
   const outCap = el.querySelector('.cap.out');
   const verdict = el.querySelector('.rack-verdict');
   const counters = Object.fromEntries([...el.querySelectorAll('[data-c]')].map((x) => [x.dataset.c, x]));
-  let checked = live.checked, refused = live.refused;
+  let checked = 0, refused = 0;
 
   // x of the rail start, each bay centre, and the rail end — relative to the rail
   let pts = [];
@@ -105,15 +103,15 @@ export function mountRack(el, { live, source, onVerdict }) {
     const b = ev.by ? byId[ev.by] : null;
     const i = b ? slots.findIndex((s) => s?.id === b.id) : -1;
     const amt = ev.kind === 'buy'
-      ? `<span class="num">${(ev.sol ?? 0).toFixed(2)} SOL</span><span class="dim">→</span><span class="num">${num(ev.amount)}</span> <span class="dim">$${esc(live.ticker)}</span>`
-      : `<span class="num">${num(ev.amount)}</span> <span class="dim">$${esc(live.ticker)}</span>`;
+      ? `<span class="num">${(ev.sol ?? 0).toFixed(2)} SOL</span><span class="dim">→</span><span class="num">${num(ev.amount)}</span> <span class="dim">tokens</span>`
+      : `<span class="num">${num(ev.amount)}</span> <span class="dim">tokens</span>`;
     verdict.className = 'rack-verdict ' + (ev.ok ? 'ok' : 'no');
     verdict.innerHTML = `
       <div class="rv-l1"><span class="rv-kind pixel k-${ev.kind}">${ev.kind}</span><span class="rv-amt">${amt}<span class="sep"></span><span class="mono dim">${esc(short(ev.wallet))}</span></span>
         <span class="rv-state pixel">${ev.ok ? `${ICON.check}Landed` : `${ICON.stop}Refused ${hex(b?.code)}`}</span></div>
       <div class="rv-l2">${ev.ok
         ? `Passed ${ev.verdicts?.length ?? hookCount} of ${hookCount} hook checks in slot order`
-        : `<b>${esc(b?.name ?? 'Block')}</b> <span class="dim">· slot ${String(i + 1).padStart(2, '0')} ·</span> ${esc(ev.msg ?? '')}`}</div>`;
+        : `<b>${esc(b?.name ?? 'Block')}</b> <span class="dim">· slot ${String(i + 1).padStart(2, '0')} · ${esc(errName(b?.code))} ·</span> ${esc(ev.msg ?? '')}`}</div>`;
     if (hookCount) checked++;
     if (!ev.ok) refused++;
     counters.checked.textContent = checked.toLocaleString('en-US');
@@ -170,7 +168,7 @@ export function mountRack(el, { live, source, onVerdict }) {
 
   const io = new IntersectionObserver(([e]) => { visible = e.isIntersecting; }, { threshold: 0.05 });
   io.observe(el);
-  const stop = api.stream(live.ticker, launch);
+  const stop = api.stream(null, launch, { stack });
   const end = () => { stop(); ro.disconnect(); io.disconnect(); cancelAnimationFrame(raf); };
   addEventListener('pagehide', end, { once: true });
   return end;

@@ -4,11 +4,12 @@ import { mountChrome } from '../ui/chrome.js';
 import { voxelSVG, asset } from '../ui/voxel.js';
 import { cube, EMBLEM, ICON } from '../ui/icons.js';
 import { avatar } from '../ui/avatar.js';
-import { byId, FAMILIES } from '../data/blocks.js';
+import { byId, FAMILIES, ENGINE, PRESETS } from '../data/blocks.js';
 import { FEES } from '../api/contract.js';
 import { api } from '../api/client.js';
 import { usd, ago, esc, num } from '../core/format.js';
-import { installTips, miniStack, handleOf, sol, enfBadges, SOL_USD } from '../ui/coin-shared.js';
+import { installTips, miniStack, handleOf, sol, enfBadges, SOL_USD, testChip } from '../ui/coin-shared.js';
+import { STARTERS, cuLabel, cuPct } from '../ui/coin-presets.js';
 import { lineageTree } from '../ui/coin-lineage.js';
 
 mountChrome('stacks');
@@ -36,7 +37,8 @@ app.innerHTML = `
 
 <section class="sk-main">
   <div class="wrap sk-grid">
-    <div class="panel sk-board">
+    <div class="sk-col">
+    <div class="panel sk-board" id="board" hidden>
       <div class="ph">
         <h3>Original stacks <span class="pk" id="boardCount"></span></h3>
         <div class="seg" id="sort"><button data-s="remixes" class="on">Most remixed</button><button data-s="royalties">Royalties</button><button data-s="new">Newest</button></div>
@@ -44,8 +46,10 @@ app.innerHTML = `
       <div class="sk-thead"><span>#</span><span>Stack</span><span>Author</span><span class="r">Remixes</span><span class="r">Royalties 24h</span><span>Families</span><span></span></div>
       <ol class="sk-rows" id="rows"></ol>
     </div>
+    <div class="panel sk-starters" id="starters">${starterPanel(true)}</div>
+    </div>
     <aside class="sk-side">
-      <div class="panel sk-authors" id="authors"></div>
+      <div class="panel sk-authors" id="authors" hidden></div>
       <div class="panel sk-how">
         <div class="ph"><h3>How remix royalties work</h3></div>
         <ol class="sk-steps">
@@ -57,6 +61,22 @@ app.innerHTML = `
     </aside>
   </div>
 </section>`;
+
+/** The five starter stacks. `lead` = nothing has launched yet, so they take the leaderboard's place. */
+function starterPanel(lead) {
+  return `<div class="ph">
+      <h3>Starter stacks <span class="pk">${PRESETS.length} stacks · open in Build</span></h3>
+    </div>
+    ${lead ? `<p class="st-note">${cube('crown', { size: 24 })}<span>Once coins launch, the most remixed stacks and the royalties their authors earn rank here. Until then, start from one of these.</span></p>` : ''}
+    <div class="st-thead"><span>Stack</span><span>Blocks</span><span class="r">Slots</span><span>Per transfer</span><span></span></div>
+    <ol class="st-rows">${STARTERS.map((p) => `<li class="st-row">
+      <span class="st-main"><b>${esc(p.name)}</b><span class="st-blurb">${esc(p.blurb)}</span></span>
+      <span class="st-cubes">${miniStack(p.stack, { size: 20, gap: 4 })}</span>
+      <span class="st-n r num"><b>${p.stack.length}</b><small>/${ENGINE.maxSlots}</small><i>slots</i></span>
+      <span class="st-cu" data-tip="${esc(cuLabel(p.budget))} of the engine's ${ENGINE.cuBudget.toLocaleString('en-US')} CU per transfer"><span class="num">${cuLabel(p.budget)}</span><span class="st-bar"><i style="width:${cuPct(p.budget)}%"></i></span></span>
+      <a class="btn btn-glass btn-sm st-go" href="${p.href}">${ICON.remix}Remix this stack</a>
+    </li>`).join('')}</ol>`;
+}
 
 const $ = (s) => app.querySelector(s);
 let stacks = [], open = null, sortBy = 'remixes';
@@ -73,7 +93,7 @@ function row(s, i) {
       ${rankMark(i)}
       <span class="sk-stack">
         ${avatar(s, 40)}
-        <span class="sk-nm"><b>${esc(s.name)}</b><span class="sk-sub"><span class="num">$${esc(s.ticker)}</span>${miniStack(s.stack, { size: 16, gap: 3 })}</span></span>
+        <span class="sk-nm"><b>${esc(s.name)}</b><span class="sk-sub"><span class="num">$${esc(s.ticker)}</span>${testChip(s)}${miniStack(s.stack, { size: 16, gap: 3 })}</span></span>
       </span>
       <span class="sk-auth">${esc(handleOf(s))}</span>
       <span class="sk-rmx r num"><b>${s.remixCount}</b><i class="sk-l">remixes</i></span>
@@ -93,6 +113,7 @@ function detail(s) {
     <div class="sk-d-l">
       <div class="sk-d-h"><span class="pk">Remix lineage</span><span class="dim">${family.length} coin${family.length > 1 ? 's' : ''} on this family · remixes traded ${usd(remixVol)} in 24h</span></div>
       ${tree ? lineageTree(tree, { current: s.ticker }) : '<div class="sk-load">Loading lineage…</div>'}
+      ${tree && !tree.children.length ? `<p class="sk-none">${cube('x', { size: 22, state: 'empty' })}<span>No remixes yet. Launch on this stack and your coin branches off here; ${esc(handleOf(s))} earns ${authorPct}% of its trade fee.</span></p>` : ''}
     </div>
     <div class="sk-d-r">
       <div class="sk-d-h"><span class="pk">The stack</span><span class="dim">by ${esc(handleOf(s))} · ${ago(s.minutesAgo)}</span></div>
@@ -168,14 +189,20 @@ function renderAuthors(all) {
   const [st, all] = await Promise.all([api.stacks(), api.coins()]);
   stacks = st;
   open = null;
-  $('#boardCount').textContent = `${st.length} stacks`;
   const remixes = st.reduce((a, s) => a + s.remixCount, 0);
   const roy = st.reduce((a, s) => a + s.royaltiesSol, 0);
   const authors = new Set(all.map((c) => c.creator)).size;
-  $('#kpis').innerHTML = [
-    ['Original stacks', num(st.length)], ['Remix launches', num(remixes)], ['Royalties 24h', `${sol(roy, false)} SOL`], ['Authors', num(authors)],
-  ].map(([k, v]) => `<div><span class="k">${k}</span><span class="v num">${v}</span></div>`).join('');
+  // nothing launched: show what is true about remixing instead of a row of zeros
+  $('#kpis').innerHTML = (st.length
+    ? [['Original stacks', num(st.length)], ['Remix launches', num(remixes)], ['Royalties 24h', `${sol(roy, false)} SOL`], ['Authors', num(authors)]]
+    : [['Starter stacks', num(PRESETS.length)], ['Author royalty', `${authorPct}%`], ['Levels paid', '1'], ['Slots per stack', num(ENGINE.maxSlots)]]
+  ).map(([k, v]) => `<div><span class="k">${k}</span><span class="v num">${v}</span></div>`).join('');
+  if (!st.length) return; // the starter stacks lead; no board, no authors yet
+  $('#board').hidden = false;
+  $('#boardCount').textContent = `${st.length} stack${st.length === 1 ? '' : 's'}`;
+  $('#sort').hidden = st.length < 2;
+  $('#starters').innerHTML = starterPanel(false);
   renderRows();
-  renderAuthors(all);
-  if (st[0]) toggle(st[0].ticker); // the top stack starts open
+  if (all.length) { $('#authors').hidden = false; renderAuthors(all); }
+  toggle(sorted()[0].ticker); // the top stack starts open
 })();

@@ -61,6 +61,7 @@ export const api = {
   async trades(ticker, { limit = 40 } = {}) {
     if (MODE === 'live') return live(`/v1/coins/${ticker}/trades?limit=${limit}`);
     const c = allCoins().find((x) => x.ticker === ticker);
+    if (!c) return [];
     const sim = runSim(c.stack, { seed: [...ticker].reduce((a, ch) => a + ch.charCodeAt(0), 0) });
     return sim.log.slice(-limit).reverse().map((e, i) => ({ ...e, sig: fakeKey(9000 + i + e.wallet, ''), wallet: fakeKey(500 + e.wallet) }));
   },
@@ -73,9 +74,9 @@ export const api = {
   },
 
   /** Rule-aware quote. side: buy (amount in SOL) | sell (amount in tokens). */
-  async quote({ ticker, side, amount, wallet = {} }) {
+  async quote({ ticker, side, amount, wallet = {}, stack: stackIn, progress: progressIn, minutesAgo: minutesIn }) {
     if (MODE === 'live') return live('/v1/quote', { mint: ticker, side, amount, wallet });
-    const c = allCoins().find((x) => x.ticker === ticker);
+    const c = allCoins().find((x) => x.ticker === ticker) ?? { stack: stackIn ?? [], progress: progressIn ?? 0.05, minutesAgo: minutesIn ?? 10 };
     const curve = new Curve();
     // warp the curve to the coin's progress
     const targetTok = curve.vTok - (curve.vTok - 279_900_191) * Math.min(0.999, c.progress);
@@ -119,6 +120,7 @@ export const api = {
     if (MODE === 'live') return live(`/v1/stacks/${ticker}/lineage`);
     const list = await api.coins();
     const by = Object.fromEntries(list.map((c) => [c.ticker, c]));
+    if (!by[ticker]) return null;
     const node = (t) => ({ coin: by[t], diff: diffStacks(by[by[t].parent]?.stack ?? [], by[t].stack), children: list.filter((c) => c.parent === t).map((c) => node(c.ticker)) });
     let root = by[ticker]; while (root.parent && by[root.parent]) root = by[root.parent];
     return node(root.ticker);
@@ -163,10 +165,10 @@ export const api = {
   },
 
   /** Live stream (WS in live mode). Demo: replays the coin's simulated log on a timer. Returns an unsubscribe fn. */
-  stream(ticker, onEvent, { speed = 1 } = {}) {
+  stream(ticker, onEvent, { speed = 1, stack: stackIn } = {}) {
     if (MODE === 'live') { const ws = new WebSocket(API_BASE.replace('http', 'ws') + `/v1/stream?mint=${ticker}`); ws.onmessage = (m) => onEvent(JSON.parse(m.data)); return () => ws.close(); }
     const c = ticker ? allCoins().find((x) => x.ticker === ticker) : null;
-    const stack = c?.stack ?? [];
+    const stack = c?.stack ?? stackIn ?? [];
     const sim = runSim(stack, { seed: ticker ? ticker.length * 97 : 7 });
     const log = sim.log;
     // start the replay where landed and refused transfers mix, so the first few seconds look like a normal market

@@ -22,7 +22,7 @@ const round = (v) => JSON.parse(JSON.stringify(v, (k, x) => (typeof x === 'numbe
 export async function apiExamples(root) {
   const fair = PRESETS.find((p) => p.id === 'fair-launch');
   const stack = fair.slots.map(([id]) => ({ id }));
-  const quoteReq = { ticker: 'SLOW', side: 'sell', amount: 15_000_000, wallet: { balance: 20_000_000 } };
+  const quoteReq = { side: 'sell', amount: 15_000_000, wallet: { balance: 20_000_000 }, stack: PRESETS.find((p) => p.id === 'slow-bleed').slots.map(([id]) => ({ id })), progress: 0.5, minutesAgo: 600 };
   const launchReq = { meta: { name: 'Fair Weather', ticker: 'FAIR' }, stack, creator: fakeKey(77) };
   const [val, quote, launch] = await Promise.all([api.validate(stack), api.quote(quoteReq), api.prepareLaunch(launchReq)]);
   const ex = [
@@ -32,7 +32,7 @@ export async function apiExamples(root) {
       note: 'Fair Launch: three Hook blocks and a Curve block. 9,900 CU of a 30,000 budget, one extra account, any route.',
     },
     {
-      id: 'quote', method: 'POST', path: '/v1/quote', req: { mint: 'SLOW', side: 'sell', amount: quoteReq.amount, wallet: quoteReq.wallet },
+      id: 'quote', method: 'POST', path: '/v1/quote', req: { mint: '<mint>', side: 'sell', amount: quoteReq.amount, wallet: quoteReq.wallet },
       res: round({ ok: quote.ok, refusedBy: quote.refusedBy, code: quote.code != null ? hex(quote.code) : null, message: quote.message, maxAllowed: Math.abs(quote.maxAllowed - Math.round(quote.maxAllowed)) < 0.01 ? Math.round(quote.maxAllowed) : Math.floor(quote.maxAllowed), out: quote.out, price: quote.price }),
       note: 'A 1.5%-of-supply sell into a Sell Cap of 1%: the quote names the block, its error, and the largest sell that passes now.',
     },

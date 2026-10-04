@@ -79,9 +79,13 @@ export function buildHistory(coin, sim) {
   }
   // volume + refusals from the stack's transfer log (curve phase), noise-driven after graduation
   const idx = (simT) => Math.min(N, Math.max(0, Math.round((simT / T) * gf * N)));
+  // refusal marks: the stack's refusal pattern, thinned to the coin's own refused count so the chart and the stats agree
+  const refs = sim.log.filter((e) => !e.ok);
+  const keep = Math.min(refs.length, coin.refused ?? refs.length);
+  const kept = new Set(Array.from({ length: keep }, (_, k) => refs[Math.floor((k * refs.length) / keep)]));
   for (const e of sim.log) {
     const i = idx(e.t);
-    if (!e.ok) { pts[i].ref++; pts[i].refBy = e.by; continue; }
+    if (!e.ok) { if (kept.has(e)) { pts[i].ref++; pts[i].refBy = e.by; } continue; }
     if (e.kind === 'send') continue;
     pts[i].vol += e.sol || e.amount * interp(S, e.t);
   }
@@ -138,7 +142,10 @@ export function mountChart(el, h, { tf = 'ALL', onTf } = {}) {
     const area = `${line}L${X(x1).toFixed(1)} ${pad.t + ph - refH - 6}L${X(x0).toFixed(1)} ${pad.t + ph - refH - 6}Z`;
     // grid + y labels
     const ticks = niceTicks(lo, hi, 4);
-    const grid = ticks.map((v) => `<line x1="${pad.l}" x2="${W - pad.r}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" class="ch-grid"/><text x="${W - pad.r + 10}" y="${(Y(v) + 3.5).toFixed(1)}" class="ch-yl">${usd(v)}</text>`).join('');
+    // axis labels with enough precision that neighbouring ticks never print the same text (narrow ranges, e.g. a fresh coin)
+    const step = ticks.length > 1 ? Math.abs(ticks[1] - ticks[0]) : hi - lo;
+    const yl = (v) => { if (v < 1e3 || step >= (v >= 1e6 ? 1e5 : 100)) return usd(v); const k = v >= 1e6 ? 1e6 : 1e3, u = k === 1e6 ? 'M' : 'K'; const d = Math.min(3, Math.max(1, Math.ceil(-Math.log10(step / k)))); return `$${(v / k).toFixed(d)}${u}`; };
+    const grid = ticks.map((v) => `<line x1="${pad.l}" x2="${W - pad.r}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" class="ch-grid"/><text x="${W - pad.r + 10}" y="${(Y(v) + 3.5).toFixed(1)}" class="ch-yl">${yl(v)}</text>`).join('');
     // x labels
     const nx = W < 560 ? 3 : 5;
     const xl = Array.from({ length: nx }, (_, i) => x0 + ((x1 - x0) * (i + 0.5)) / nx).map((t) => `<text x="${X(t).toFixed(1)}" y="${H - 8}" class="ch-xl" text-anchor="middle">${fmtT(t, x1 - x0)}</text>`).join('');

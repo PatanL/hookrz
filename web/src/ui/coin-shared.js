@@ -8,6 +8,9 @@ import { SOL_USD } from '../data/coins.js';
 
 export { SOL_USD };
 
+/** "Test" chip for coins marked `test` (no contract address). */
+export const testChip = (c) => (c?.test ? '<span class="tchip" data-tip="Test coin: it has no contract address">Test</span>' : '');
+
 /** "@handle" for a shaped coin. */
 export const handleOf = (c) => '@' + (c?.creatorInfo?.handle ?? c?.creator ?? '');
 

@@ -16,16 +16,12 @@
 .cx-stat.ref .v { background: none; color: var(--refuse); text-shadow: 0 0 18px rgba(255,98,87,.35); }
 .cx-stat .s { font-size: 11.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* live refusals */
-.cx-live { margin-top: 28px; padding: 0; overflow: hidden; }
-.cx-live-h { display: flex; align-items: center; gap: 10px; padding: 11px 16px; border-bottom: 1px solid var(--line); background: linear-gradient(90deg, rgba(255,98,87,.07), transparent 40%); }
+/* refused just now: one compact row until a refusal lands */
+.cx-live { margin-top: 24px; padding: 0; overflow: hidden; }
+.cx-live-h { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; padding: 12px 16px; background: linear-gradient(90deg, rgba(255,98,87,.07), transparent 40%); }
 .cx-live-t { white-space: nowrap; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--text); }
-.cx-live-src { margin-left: auto; display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--text-3); }
-.cx-live-src::before { content: 'watching'; font-family: var(--font-pixel); font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; margin-right: 2px; }
-.cx-live-src a { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-2); padding: 2px 6px; border: 1px solid var(--line); border-radius: 3px; }
-.cx-live-src a:hover { color: var(--text); border-color: var(--line-2); }
-.cx-live-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); min-height: 132px; }
-.cx-live-wait { grid-column: 1 / -1; display: grid; place-items: center; color: var(--text-3); font-size: 13px; }
+.cx-live-empty { margin-left: auto; font-size: 12.5px; color: var(--text-3); min-width: 0; }
+.cx-live-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); }
 .lv { display: flex; align-items: center; gap: 12px; padding: 12px 16px; min-width: 0; border-top: 1px solid var(--line); border-left: 1px solid var(--line); transition: background .2s; }
 .lv:nth-child(-n+3) { border-top: 0; }
 .lv:nth-child(3n+1) { border-left: 0; }
@@ -53,6 +49,8 @@
 .fchip .emb { width: 15px; height: 15px; color: var(--chrome-3); }
 .fchip:hover { color: var(--text); border-color: rgba(143,202,255,.35); }
 .fchip.on { color: var(--text); border-color: rgba(143,202,255,.6); background: linear-gradient(180deg, rgba(110,178,255,.18), rgba(110,178,255,.06)); box-shadow: 0 0 18px -6px var(--ice-glow), inset 0 1px 0 rgba(255,255,255,.12); }
+.fchip[disabled] { opacity: .32; cursor: not-allowed; }
+.fchip[disabled]:hover { color: var(--text-2); border-color: var(--line-2); }
 .fchip.on .emb { color: var(--ice); filter: drop-shadow(0 0 4px rgba(77,155,255,.8)); }
 .cx-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cx-tools .seg button { padding: 0 10px; }
@@ -117,6 +115,24 @@
 .cx-empty-cubes { display: flex; gap: 6px; margin-bottom: 6px; }
 .cx-empty p { max-width: 46ch; }
 
+/* nothing launched yet */
+.cx-zero { display: flex; flex-direction: column; gap: 18px; }
+.cx-zero-hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 520px); align-items: center; gap: 0; padding: 0; overflow: hidden; }
+.cx-zero-copy { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 16px; padding: clamp(28px, 4vw, 52px); min-width: 0; }
+.cx-zero-cubes { display: flex; gap: 6px; }
+.cx-zero-h { margin: 0; font-size: clamp(34px, 4.6vw, 56px); line-height: 1; font-weight: 800; font-variation-settings: 'wdth' 118; letter-spacing: -.02em;
+  background: var(--chrome-text); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.cx-zero-copy .lede { max-width: 50ch; font-size: 16px; margin: 0; }
+.cx-zero-cta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.cx-zero-art { align-self: stretch; display: flex; align-items: center; margin-left: -40px; min-width: 0; }
+.cx-zero-art img { width: 100%; height: auto; mix-blend-mode: screen; -webkit-mask-image: radial-gradient(ellipse 70% 80% at 55% 50%, #000 50%, transparent 100%); mask-image: radial-gradient(ellipse 70% 80% at 55% 50%, #000 50%, transparent 100%); }
+.cx-zero-h3 { display: flex; align-items: baseline; gap: 6px 14px; flex-wrap: wrap; margin: 14px 2px 0; }
+.cx-zero-h3 h3 { font-size: 18px; font-variation-settings: 'wdth' 114; }
+.cx-zero-h3 .dim { font-size: 13px; }
+.cx-zero-h3 .btn { margin-left: auto; }
+.cx-more { margin-top: 40px; display: flex; flex-direction: column; gap: 14px; }
+.cx-more .cx-zero-h3 { margin-top: 0; align-items: center; }
+
 @media (max-width: 1100px) {
   .cx-head { grid-template-columns: 1fr; gap: 28px; align-items: start; }
   .cx-controls { position: static; }
@@ -129,15 +145,14 @@
   .lv:nth-child(2n+1) { border-left: 0; }
 }
 @media (max-width: 640px) {
-  .cx-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .cx-stat:nth-child(3) { border-left: 0; }
-  .cx-stat:nth-child(n+3) { border-top: 1px solid var(--line); }
-  .cx-live-list { grid-template-columns: 1fr; min-height: 0; }
-  .cx-live-wait { padding: 26px 0; }
+  .cx-live-empty { margin-left: 0; flex-basis: 100%; }
+  .cx-live-list { grid-template-columns: 1fr; }
   .lv, .lv:nth-child(n) { border-left: 0; border-top: 1px solid var(--line); }
   .lv:first-child { border-top: 0; }
   .lv:nth-child(n+5) { display: none; }
-  .cx-live-src::before { display: none; }
+  .cx-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cx-stat:nth-child(3) { border-left: 0; }
+  .cx-stat:nth-child(n+3) { border-top: 1px solid var(--line); }
   .cx-controls { padding: 10px; }
   .cx-fams { flex-wrap: nowrap; overflow-x: auto; margin: 0 -10px; padding: 0 10px 2px; scrollbar-width: none; width: calc(100% + 20px); }
   .cx-fams::-webkit-scrollbar { display: none; }
@@ -150,5 +165,12 @@
   .cx-search input { width: 100%; }
   .cx-hint { display: none; }
   .cx-grid { grid-template-columns: 1fr; }
+  .cx-zero-hero { grid-template-columns: 1fr; }
+  .cx-zero-art { order: -1; margin: -8px -24px -40px; }
+  .cx-zero-copy { padding: 0 20px 24px; }
+  .cx-zero-cubes { display: none; }
+  .cx-zero-cta { width: 100%; }
+  .cx-zero-cta .btn { flex: 1 1 100%; }
   .ccard { padding: 16px; }
 }
+@media (max-width: 640px) { .cx-more .cx-zero-h3 .btn { display: none; } .cx-more { margin-top: 28px; } }

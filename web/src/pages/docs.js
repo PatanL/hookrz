@@ -2,7 +2,7 @@ import '../styles/base.css';
 import '../styles/docs.css';
 import { mountChrome } from '../ui/chrome.js';
 import { voxelSVG, asset } from '../ui/voxel.js';
-import { FAMILIES, ENFORCERS, ENGINE, BLOCKS, rentSol, hex } from '../data/blocks.js';
+import { FAMILIES, ENFORCERS, ENGINE, BLOCKS, PRESETS, rentSol, hex } from '../data/blocks.js';
 import { FEES, SERVICES } from '../api/contract.js';
 import { api } from '../api/client.js';
 import { esc } from '../core/format.js';
@@ -328,12 +328,12 @@ fillLater.push(api.draftHookscript('Wallets can\'t sell more than they bought in
     <p class="dim hs-try">Draft your own in the <a href="blocks.html?b=custom">Custom block</a>.</p></div>`;
 }));
 
-const QUOTE = { ticker: 'SLOW', side: 'sell', wallet: { balance: 20_000_000 } };
+const QUOTE = { side: 'sell', wallet: { balance: 20_000_000 }, stack: PRESETS.find((p) => p.id === 'slow-bleed').slots.map(([id]) => ({ id })), progress: 0.5, minutesAgo: 600 };
 const tidy = (x) => (Math.abs(x - Math.round(x)) < 0.01 ? Math.round(x) : Math.floor(x));
 function quotePanel(qr, amount = 15_000_000) {
   const max = tidy(qr.maxAllowed);
   return `<div class="qx panel">
-    <div class="qx-req"><span class="pixel">POST /v1/quote</span><b>Sell <span class="mono">${n(amount)}</span> $SLOW</b><span class="dim">Wallet holds 20,000,000. Stack: Sell Cap 1%, Sell Cooldown, Circuit Breaker, Hourly Outflow Cap.</span></div>
+    <div class="qx-req"><span class="pixel">POST /v1/quote</span><b>Sell <span class="mono">${n(amount)}</span> tokens of a Slow Bleed coin</b><span class="dim">Wallet holds 20,000,000. Stack: Sell Cap 1%, Sell Cooldown, Circuit Breaker, Hourly Outflow Cap.</span></div>
     <div class="qx-res ${qr.ok ? 'ok' : 'no'}"><span class="pixel">${qr.ok ? 'Lands' : `Refused · ${hex(qr.code)}`}</span><p>${esc(qr.message ?? `Passes every block. You'd get ${qr.out.toFixed(3)} SOL.`)}</p>
       <div class="qx-row"><span>refusedBy</span><code>${esc(qr.refusedBy ?? 'null')}</code><span>maxAllowed</span><code>${n(max)}</code></div>
       ${qr.ok ? (amount !== 15_000_000 ? '<button class="btn btn-ghost btn-sm" type="button" data-q="15000000">Back to 15,000,000</button>' : '') : `<button class="btn btn-glass btn-sm" type="button" data-q="${max}">Quote ${n(max)} instead</button>`}</div>

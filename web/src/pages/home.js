@@ -7,12 +7,13 @@ import { voxelSVG } from '../ui/voxel.js';
 import { cube, ICON } from '../ui/icons.js';
 import { avatar } from '../ui/avatar.js';
 import { usd, pctS, esc } from '../core/format.js';
-import { FAMILIES, ENFORCERS, ENGINE, BLOCKS, byId } from '../data/blocks.js';
-import { api, diffStacks } from '../api/client.js';
+import { FAMILIES, ENFORCERS, ENGINE, BLOCKS, PRESETS, byId } from '../data/blocks.js';
+import { api } from '../api/client.js';
 import { FEES } from '../api/contract.js';
 import { mountRack } from '../ui/home-rack.js';
 import { mountFlow } from '../ui/home-flow.js';
-import { mountLineage } from '../ui/home-lineage.js';
+import { mountLineage, remixTree } from '../ui/home-lineage.js';
+import { mountRoyalty } from '../ui/home-royalty.js';
 
 let io; // reveal-on-scroll observer (declared before the first reveal() call)
 
@@ -20,7 +21,15 @@ mountChrome('');
 
 const ARROW = ICON.arrow;
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
-const sol = (n) => `${n >= 10 ? n.toFixed(1) : n.toFixed(2)} SOL`;
+const share = (who) => FEES.split.find((s) => s.who === who)?.pct ?? 0;
+const FAIR = PRESETS.find((p) => p.id === 'fair-launch') ?? PRESETS[0];
+// the strip under the hero: fixed facts of the engine and the fee, nothing counted
+const FACTS = [
+  ['Blocks', `${BLOCKS.length}`, `in ${FAMILIES.length} families, each one rule`],
+  ['Slots per stack', `${ENGINE.maxSlots}`, 'run in order on every transfer'],
+  ['To launch', `${FEES.launchCostSol}<small>SOL</small>`, 'mint, curve and stack in one tx'],
+  ['Remix royalty', `${share('Stack author')}<small>%</small>`, 'of the fee on every remix of your stack'],
+];
 const ENF_ORDER = ['hook', 'curve', 'crank', 'ext'];
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
@@ -55,8 +64,8 @@ app.innerHTML = `
       </div>
     </div>
     <div class="stats-strip px rv" id="stats" style="--d:200ms">
-      ${[['coins', 'Coins launched'], ['checked', 'Transfers checked'], ['refused', 'Refused'], ['remixes', 'Remixes']].map(([k, l]) => `
-      <div class="stat"><span class="stat-k pixel">${l}</span><b class="num" data-s="${k}">&nbsp;</b><span class="stat-sub" data-sub="${k}">&nbsp;</span></div>`).join('')}
+      ${FACTS.map(([l, v, sub]) => `
+      <div class="stat"><span class="stat-k pixel">${l}</span><b class="num">${v}</b><span class="stat-sub">${sub}</span></div>`).join('')}
     </div>
   </div>
 </section>
@@ -127,12 +136,16 @@ app.innerHTML = `
       <div class="section-head rv">
         <span class="eyebrow">Remix</span>
         <h2>Fork any stack <span class="chrome-text">in one click.</span></h2>
-        <p class="lede">Every stack is public. Open a coin, hit Remix, tune a block or swap one out, and launch. The new coin keeps a parent link, so its lineage is on chain and the royalty knows where to go.</p>
-        <div><a class="btn btn-chrome btn-lg" href="stacks.html">Remix a stack ${ARROW}</a></div>
+        <p class="lede">Every stack is public. Open a coin or a preset, hit Remix, tune a block or add one, and launch. The new coin keeps a parent link, so its lineage is on chain and the royalty knows where to go.</p>
+        <div class="remix-ctas"><a class="btn btn-chrome btn-lg" href="build.html?preset=${FAIR.id}">Remix ${esc(FAIR.name)} ${ARROW}</a><a class="btn btn-glass btn-lg" href="stacks.html">Browse stacks</a></div>
       </div>
       <img class="remix-art rv" src="img/brand/remix-tree.webp" srcset="img/brand/remix-tree-900.webp 900w, img/brand/remix-tree.webp 1672w" sizes="(max-width: 1020px) 100vw, 640px" alt="One stack of blocks branching into three remixes" width="1672" height="941" loading="lazy" decoding="async">
     </div>
-    <div class="lineage px rv" id="lineage"><div class="lin-head"><span class="pixel">Lineage</span><span class="lin-title"></span></div><div class="lin-body"></div></div>
+    <div class="lineage px rv" id="lineage">
+      <div class="lin-head"><span class="pixel">How a remix works</span><span class="lin-title"><b>${esc(FAIR.name)}</b> <span class="dim">preset, remixed three ways. Each remix changes one thing.</span></span></div>
+      <div class="lin-body"></div>
+      <p class="lin-note"><span class="lin-key"><i class="k-add"></i>Block added</span><span class="lin-key"><i class="k-tune"></i>Setting tuned</span><span>A remix you launch keeps a parent link on chain. Remix a coin and ${share('Stack author')}% of your coin's fee goes to the author of the stack you forked.</span></p>
+    </div>
   </div>
 </section>
 
@@ -161,11 +174,7 @@ app.innerHTML = `
 
 <section class="section trending" id="trending">
   <div class="wrap">
-    <div class="trend-head rv">
-      <div class="section-head"><span class="eyebrow">Trending</span><h2>Moving now.</h2></div>
-      <a class="btn btn-glass" href="coins.html">All coins ${ARROW}</a>
-    </div>
-    <div class="coin-grid" id="trend">${'<div class="coin-card skel"></div>'.repeat(6)}</div>
+    <div id="trend"><div class="coin-grid">${'<div class="coin-card skel"></div>'.repeat(3)}</div></div>
   </div>
 </section>
 
@@ -185,75 +194,57 @@ app.innerHTML = `
 </section>`;
 
 reveal();
+mountRack(document.getElementById('rack'), { preset: FAIR });
 mountFlow(document.getElementById('flow'));
-load().catch(() => {
-  // the API is unreachable: keep the static page, say so where live data would be
-  document.getElementById('rack').innerHTML = '<p class="rack-down">The live feed is reconnecting. Refresh in a moment.</p>';
-  document.getElementById('trend').innerHTML = '';
-});
+mountLineage(document.querySelector('#lineage .lin-body'), remixTree(FAIR, [
+  { title: 'Pay the holders', blurb: 'Same launch rules, and holders share the creator fees.', change: { add: 'holder-rewards' } },
+  { title: 'Tighten the launch', blurb: 'Smaller first buys while the launch window is open.', change: { tune: ['snipe-shield', { max: 0.25 }] } },
+  { title: 'Stop sandwiches', blurb: 'Same launch rules, and same-block flips are refused.', change: { add: 'sandwich-guard' } },
+]));
+mountRoyalty(document.getElementById('ownEx'), document.getElementById('feeEx'));
+loadTrending();
 
-async function load() {
-  const [coins, stackSrc, stacks, lineage] = await Promise.all([api.coins({ sort: 'volume' }), api.coin('STACK'), api.stacks(), api.lineage('STACK')]);
+/** Trending: coins launched on hookrz, test coins left out. With none yet, the board says so. */
+async function loadTrending() {
+  const el = document.getElementById('trend');
+  const coins = (await api.coins({ sort: 'volume' }).catch(() => [])).filter((c) => !c.test);
+  if (!coins.length) {
+    el.innerHTML = emptyBoard();
+    reveal(el);
+    return;
+  }
+  const shown = coins.slice(0, 6);
+  el.innerHTML = `
+    <div class="trend-head rv">
+      <div class="section-head"><span class="eyebrow">Trending</span><h2>Moving now.</h2></div>
+      <a class="btn btn-glass" href="coins.html">All coins ${ARROW}</a>
+    </div>
+    <div class="coin-grid">${shown.map(coinCard).join('')}${shown.length < 6 && shown.length % 3 ? nextCard(shown.length) : ''}</div>`;
+  reveal(el);
+}
 
-  // stats strip
-  const S = {
-    coins: coins.length, checked: coins.reduce((a, c) => a + c.checked, 0),
-    refused: coins.reduce((a, c) => a + c.refused, 0), remixes: coins.filter((c) => c.parent).length,
-  };
-  const set = (k, v, sub) => { document.querySelector(`[data-s="${k}"]`).textContent = fmt(v); if (sub != null) document.querySelector(`[data-sub="${k}"]`).textContent = sub; };
-  const subs = () => ({
-    coins: `${coins.filter((c) => c.phase === 'graduated').length} graduated to DAMM v2`,
-    checked: 'by hookrz_engine, live',
-    refused: `${((S.refused / S.checked) * 100).toFixed(1)}% of transfers`,
-    remixes: `from ${new Set(coins.filter((c) => c.parent).map((c) => c.parent)).size} parent stacks`,
-  });
-  Object.entries(subs()).forEach(([k, s]) => set(k, S[k], s));
+function emptyBoard() {
+  return `
+  <div class="board-empty px rv">
+    <div class="be-copy">
+      <span class="eyebrow">Trending</span>
+      <h2>No coins yet.</h2>
+      <p class="lede">The first coin launched on hookrz leads this board. Snap up to ${ENGINE.maxSlots} blocks into a stack, tune them and launch in one transaction.</p>
+      <div class="be-ctas"><a class="btn btn-chrome btn-lg" href="build.html">Build the first coin ${ARROW}</a><a class="btn btn-glass btn-lg" href="build.html#presets">Start from a preset</a></div>
+    </div>
+    <div class="be-shelf" aria-hidden="true">
+      ${FAMILIES.map((f, i) => `<a class="be-slot" href="blocks.html#${f.id}" tabindex="-1" style="--i:${i}"><img src="img/brand/block-${f.id}-sm.webp" alt="" width="240" height="240" loading="lazy" decoding="async"><span class="pixel">${esc(f.name)}</span></a>`).join('')}
+    </div>
+  </div>`;
+}
 
-  // hero rack: the $STACK stack, streaming from the newest coin on the curve that runs it unchanged
-  // (a graduated coin's hook is retired, so the live feed comes from a coin still on its curve)
-  const twins = coins.filter((c) => c.phase === 'curve' && (c.ticker === stackSrc.ticker || c.parent === stackSrc.ticker))
-    .filter((c) => { const d = diffStacks(stackSrc.stack, c.stack); return !d.added.length && !d.removed.length && !d.tuned.length; })
-    .sort((a, b) => a.minutesAgo - b.minutesAgo);
-  const live = stackSrc.phase === 'curve' ? stackSrc : twins[0] ?? stackSrc;
-  mountRack(document.getElementById('rack'), {
-    live, source: stackSrc,
-    onVerdict: (ev) => {
-      S.checked++; if (!ev.ok) S.refused++;
-      set('checked', S.checked); set('refused', S.refused, subs().refused);
-    },
-  });
-
-  // remix lineage
-  const lin = document.getElementById('lineage');
-  const count = (n) => n.children.reduce((a, c) => a + 1 + count(c), 0);
-  lin.querySelector('.lin-title').innerHTML = `<b>${esc(lineage.coin.name)}</b> <span class="dim">· $${esc(lineage.coin.ticker)} by ${esc(lineage.coin.creatorInfo?.handle ?? lineage.coin.creator)} ·</span> <span class="num">${count(lineage)}</span> <span class="dim">remixes</span>`;
-  mountLineage(lin.querySelector('.lin-body'), lineage);
-
-  // own: the top stack's royalties and a worked fee example from its busiest remix
-  const top = stacks[0];
-  const kid = coins.filter((c) => c.parent === top.ticker).sort((a, b) => b.vol24Usd - a.vol24Usd)[0];
-  const share = (who) => FEES.split.find((s) => s.who === who)?.pct ?? 0;
-  const fee = kid ? (kid.vol24Usd * FEES.tradeFeePct) / 100 : 0;
-  document.getElementById('ownEx').innerHTML = `
-    <a class="own-top nr" href="coin.html?t=${esc(top.ticker)}">
-      ${avatar(top, 52)}
-      <div class="own-id"><span class="pixel dim">Top stack</span><b>${esc(top.name)}</b><small>$${esc(top.ticker)} · by ${esc(top.creatorInfo?.handle ?? top.creator)}</small></div>
-      <div class="own-n"><b class="num">${top.remixCount}</b><span class="pixel">Remixes</span></div>
-      <div class="own-n"><b class="num ice">${sol(top.royaltiesSol)}</b><span class="pixel">Royalties · 24h</span></div>
-    </a>
-    <p class="own-note">Royalties go one level up: a remix of a remix pays the stack it forked, not the original.</p>`;
-  document.getElementById('feeEx').innerHTML = kid ? `
-      <span class="pixel fee-ex-k">Worked example · last 24h</span>
-      <p><a class="mono" href="coin.html?t=${esc(kid.ticker)}">$${esc(kid.ticker)}</a> remixed ${esc(top.name)} and traded <b class="num">${usd(kid.vol24Usd)}</b>. Its <b class="num">${usd(fee)}</b> in fees split three ways:</p>
-      <ul>
-        <li><span class="sw s0"></span><span>${esc(kid.creatorInfo?.handle ?? kid.creator)}<small>creator of $${esc(kid.ticker)}</small></span><b class="num">${usd((fee * share('Creator')) / 100)}</b></li>
-        <li><span class="sw s1"></span><span>hookrz<small>engine, keeper, API</small></span><b class="num">${usd((fee * share('hookrz')) / 100)}</b></li>
-        <li><span class="sw s2"></span><span>${esc(top.creatorInfo?.handle ?? top.creator)}<small>author of the stack it remixed</small></span><b class="num ice">${usd((fee * share('Stack author')) / 100)}</b></li>
-      </ul>` : '';
-
-  // trending
-  document.getElementById('trend').innerHTML = coins.slice(0, 6).map(coinCard).join('');
-  reveal(document.getElementById('trend'));
+function nextCard(i) {
+  return `<a class="coin coin-next nr rv" style="--d:${(i % 3) * 70}ms" href="build.html">
+    <span class="coin-next-cubes">${FAMILIES.slice(0, 3).map((f) => cube(f.id, { size: 26 })).join('')}</span>
+    <b>Launch the next one</b>
+    <span class="dim">Start from a preset or a blank rack.</span>
+    <span class="fam-go">Build a coin ${ARROW}</span>
+  </a>`;
 }
 
 /** Voxel display line plus a faces-only copy that a moving mask sweeps across: a chrome glint. */

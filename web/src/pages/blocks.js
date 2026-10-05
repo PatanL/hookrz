@@ -1,150 +1,142 @@
 import '../styles/base.css';
 import '../styles/blocks.css';
 import { mountChrome } from '../ui/chrome.js';
-import { asset, voxelSVG } from '../ui/voxel.js';
-import { FAMILIES, ENFORCERS, ENGINE, rentSol, hex, errName } from '../data/blocks.js';
+import { FAMILIES, hex, errName } from '../data/blocks.js';
 import { api } from '../api/client.js';
 import { esc, q } from '../core/format.js';
-import { card } from '../ui/blocks-card.js';
+import { installTips, pxTile, ruleName } from '../ui/coin-shared.js';
+import { card, famLabel, famBlurb, plainLine } from '../ui/blocks-card.js';
+import { ideasSection } from '../ui/blocks-ideas.js';
 import { openDetail } from '../ui/blocks-detail.js';
 
 mountChrome('blocks');
+installTips();
 const app = document.getElementById('app');
-const ENF_ORDER = ['hook', 'curve', 'crank', 'ext'];
-const state = { fam: '', enf: '', wallet: false, q: '' };
+const state = { fam: '', q: '' };
 
 main();
 
 async function main() {
   const blocks = await api.blocks();
-  const count = (fn) => blocks.filter(fn).length;
-  const famCount = (id) => count((b) => b.family === id);
-  const enfCount = (e) => count((b) => b.enforcedBy === e);
+  const famCount = (id) => blocks.filter((b) => b.family === id).length;
+  const fams = FAMILIES.filter((f) => f.id !== 'custom');
+  const own = blocks.find((b) => b.id === 'custom');
 
   app.innerHTML = `
   <section class="bk-hero">
     <div class="wrap">
-      <div class="bk-hero-top">
-        <div class="bk-hero-copy">
-          <span class="eyebrow">Block catalog</span>
-          <h1 class="chrome-text">Every block</h1>
-          <p class="lede">Each block says what the chain refuses, who enforces it and what it costs per transfer. Snap up to ${ENGINE.maxSlots} into a stack.</p>
+      <span class="eyebrow">Rules</span>
+      <h1 class="chrome-text">Rules your coin can enforce on every trade</h1>
+      <p class="lede">Pick a few when you launch, or write your own in plain English. Once your coin is live, the chain checks them on every buy, sell and send, and nobody can change them.</p>
+    </div>
+  </section>
+
+  <div class="wrap">${ideasSection()}</div>
+
+  <section class="bk-cat" id="all" aria-labelledby="all-h">
+    <div class="wrap bk-cat-head">
+      <span class="eyebrow">Ready-made rules</span>
+      <h2 id="all-h">Every rule, by what it does</h2>
+      <p class="bk-cat-sub">${blocks.length - 1} rules with settings you can tune. Mix up to six on one coin.</p>
+    </div>
+    <div class="bk-filters" id="filters">
+      <div class="wrap bk-frow">
+        <div class="bk-chips" role="group" aria-label="Show rules for">
+          <button type="button" data-fam="" class="on">All</button>
+          ${fams.map((f) => `<button type="button" data-fam="${f.id}">${pxTile(f.id, { size: 20 })}${esc(famLabel(f.id))}</button>`).join('')}
         </div>
-        <dl class="bk-counts">
-          <div class="big"><dt>Blocks</dt><dd class="num">${blocks.length}</dd></div>
-          <div class="big"><dt>Families</dt><dd class="num">${FAMILIES.length}</dd></div>
-          ${ENF_ORDER.map((e) => `<div title="${esc(ENFORCERS[e].long)}"><dt><span class="enf ${e}"><i></i>${ENFORCERS[e].name}</span></dt><dd class="num">${enfCount(e)}</dd></div>`).join('')}
-        </dl>
+        <label class="bk-search"><span class="sr">Search rules</span>
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="m11 11 3.5 3.5"/></svg>
+          <input class="input" id="fQ" type="search" placeholder="Search rules" autocomplete="off">
+        </label>
       </div>
-      <nav class="bk-fams" aria-label="Jump to a family">
-        ${FAMILIES.map((f) => `<a href="#${f.id}" class="bk-fam" data-jump="${f.id}">
-          <img src="${asset(`img/brand/block-${f.id}-sm.webp`)}" alt="" width="240" height="240" loading="eager" decoding="async">
-          <span class="bk-fam-name">${f.name}</span><span class="bk-fam-n pixel">${famCount(f.id)} blocks</span></a>`).join('')}
-      </nav>
-      <div class="bk-legend">
-        ${ENF_ORDER.map((e) => `<div><span class="enf ${e}"><i></i>${ENFORCERS[e].name}</span><p>${esc(ENFORCERS[e].long)}.</p></div>`).join('')}
+    </div>
+
+    <div class="wrap bk-main">
+      ${fams.map((f) => `
+      <section class="bk-family" id="${f.id}" data-family="${f.id}">
+        <header class="bk-fhead">
+          ${pxTile(f.id, { size: 44 })}
+          <div class="bk-fcopy"><h3>${esc(famLabel(f.id))} <span class="bk-verb">${esc(f.verb.toLowerCase())}</span></h3><p>${esc(famBlurb(f))}</p></div>
+          <span class="bk-fn">${famCount(f.id)} rules</span>
+        </header>
+        <div class="bk-grid">${blocks.filter((b) => b.family === f.id).map(card).join('')}</div>
+      </section>`).join('')}
+      <div class="bk-empty panel" id="empty" hidden>
+        <p><b>No rule matches.</b> <span class="muted">Try another word, or describe the rule you want in plain English.</span></p>
+        <div class="row wrap-row" style="gap:8px"><button class="btn btn-glass btn-sm" id="clear">Show all rules</button><button class="btn btn-chrome btn-sm" data-open="custom">Write your own</button></div>
       </div>
     </div>
   </section>
 
-  <div class="bk-filters" id="filters">
-    <div class="wrap">
-      <div class="bk-frow">
-        <div class="bk-seg" role="group" aria-label="Family">
-          <button data-fam="" class="on">All</button>
-          ${FAMILIES.map((f) => `<button data-fam="${f.id}">${f.name}</button>`).join('')}
-        </div>
-        <div class="bk-seg enfs" role="group" aria-label="Enforced by">
-          ${ENF_ORDER.map((e) => `<button data-enf="${e}" title="${esc(ENFORCERS[e].long)}"><span class="enf ${e}"><i></i></span>${ENFORCERS[e].name}</button>`).join('')}
-        </div>
-        <label class="bk-check" title="Blocks that keep a per-holder Wallet record (~${rentSol(ENGINE.walletRecordBytes).toFixed(4)} SOL rent, refunded after graduation)">
-          <input type="checkbox" id="fWallet"><span class="sw" aria-hidden="true"></span>Needs wallet record
-        </label>
-        <div class="bk-search">
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="m11 11 3.5 3.5"/></svg>
-          <input class="input" id="fQ" type="search" placeholder="Search, or an error like 6003" aria-label="Search blocks" autocomplete="off">
-        </div>
-        <span class="bk-shown mono" id="shown" aria-live="polite"></span>
+  <div class="wrap">
+    <aside class="bk-own panel" id="custom" data-family="custom">
+      ${pxTile('custom', { size: 52 })}
+      <div class="bk-own-copy">
+        <h2>Don't see your rule? Write your own.</h2>
+        <p class="muted">${esc(plainLine(own))} Every one is tested against 10,000 trades and checked so holders can always sell eventually, before it can launch.</p>
       </div>
-    </div>
-  </div>
-
-  <div class="wrap bk-main">
-    ${FAMILIES.map((f, i) => `
-    <section class="bk-family" id="${f.id}" data-family="${f.id}">
-      <header class="bk-fhead">
-        <img class="bk-frender" src="${asset(`img/brand/block-${f.id}-sm.webp`)}" alt="" width="240" height="240" loading="lazy" decoding="async">
-        <div class="bk-fcopy">
-          <span class="eyebrow">Family ${String(i + 1).padStart(2, '0')} · ${famCount(f.id)} blocks</span>
-          <h2>${f.name} <span class="bk-verb">${esc(f.verb)}</span></h2>
-          <p>${esc(f.blurb)}</p>
-          <div class="bk-fenf">${ENF_ORDER.filter((e) => blocks.some((b) => b.family === f.id && b.enforcedBy === e)).map((e) => `<span class="enf ${e}"><i></i>${blocks.filter((b) => b.family === f.id && b.enforcedBy === e).length} ${ENFORCERS[e].name}</span>`).join('')}</div>
-        </div>
-        <div class="bk-fnum" aria-hidden="true">${voxelSVG(String(i + 1), { cell: 10, gap: 1.6, glow: true })}</div>
-      </header>
-      <div class="bk-grid">${blocks.filter((b) => b.family === f.id).map(card).join('')}</div>
-    </section>`).join('')}
-    <div class="bk-empty panel" id="empty" hidden>
-      <p><b>No block matches.</b> <span class="muted">Try another word, or search an error code like <span class="mono">${hex(0x1773)}</span>.</span></p>
-      <button class="btn btn-glass btn-sm" id="clear">Clear filters</button>
-    </div>
-    <aside class="bk-cta panel">
-      <div><h3>Have a rule that isn't here?</h3><p class="muted">Describe it in English. The Custom block writes it in Hookscript, measures its CU and fuzzes it against 10,000 trades before it can launch.</p></div>
-      <div class="row wrap-row" style="gap:10px"><button class="btn btn-chrome" data-open="custom">Try the Custom block</button><a class="btn btn-glass" href="docs.html#hookscript">Read about Hookscript</a></div>
+      <div class="bk-own-cta"><button type="button" class="btn btn-chrome" data-open="custom">Try it here</button><a class="btn btn-glass" href="build.html?add=custom">Use it in a launch</a></div>
     </aside>
   </div>`;
 
-  // ── filters
+  // ── rule ideas: more / fewer
+  const moreBtn = app.querySelector('#ideasMore');
+  const grid = app.querySelector('#ideaGrid');
+  const label = () => {
+    const open = grid.classList.contains('all');
+    const hidden = [...grid.children].filter((c) => !c.offsetParent).length;
+    moreBtn.textContent = open ? 'Show fewer ideas' : `Show ${hidden} more ideas`;
+    moreBtn.setAttribute('aria-expanded', String(open));
+  };
+  moreBtn.addEventListener('click', () => {
+    const open = grid.classList.toggle('all');
+    label();
+    if (!open) app.querySelector('#ideas').scrollIntoView({ block: 'start', behavior: 'smooth' });
+  });
+  label();
+  matchMedia('(max-width: 760px)').addEventListener?.('change', label);
+
+  // ── filters: family chips + search (codes and setting names still match, for people who know them)
   const cards = [...app.querySelectorAll('.bk-card')];
   const byIdCard = Object.fromEntries(cards.map((c) => [c.dataset.id, c]));
-  const text = Object.fromEntries(blocks.map((b) => [b.id, [b.id, b.name, b.tagline, b.refuses, b.family, hex(b.code), b.code != null ? errName(b.code) : '', ...b.params.map((p) => p.label), b.error ? b.error(Object.fromEntries(b.params.map((p) => [p.key, p.def]))) : ''].join(' ').toLowerCase()]));
-  const match = (b) => (!state.fam || b.family === state.fam)
-    && (!state.enf || b.enforcedBy === state.enf || b.also === state.enf)
-    && (!state.wallet || b.state === 'wallet')
-    && (!state.q || state.q.split(/\s+/).every((w) => text[b.id].includes(w)));
+  const listed = blocks.filter((b) => byIdCard[b.id]);
+  const text = Object.fromEntries(listed.map((b) => [b.id, [b.id, b.name, ruleName(b), b.tagline, plainLine(b), b.refuses, b.family, famLabel(b.family), hex(b.code), b.code != null ? errName(b.code) : '', ...b.params.map((p) => p.label)].join(' ').toLowerCase()]));
+  const match = (b) => (!state.fam || b.family === state.fam) && (!state.q || state.q.split(/\s+/).every((w) => text[b.id].includes(w)));
 
   function apply() {
     let n = 0;
-    for (const b of blocks) { const ok = match(b); byIdCard[b.id].hidden = !ok; if (ok) n++; }
+    for (const b of listed) { const ok = match(b); byIdCard[b.id].hidden = !ok; if (ok) n++; }
     for (const s of app.querySelectorAll('.bk-family')) s.hidden = !s.querySelector('.bk-card:not([hidden])');
     app.querySelector('#empty').hidden = n > 0;
-    app.querySelector('#shown').textContent = n === blocks.length ? `${n} blocks` : `${n} of ${blocks.length}`;
-    app.querySelectorAll('[data-fam]').forEach((x) => x.classList.toggle('on', x.dataset.fam === state.fam));
-    app.querySelectorAll('[data-enf]').forEach((x) => { x.classList.toggle('on', x.dataset.enf === state.enf); x.setAttribute('aria-pressed', String(x.dataset.enf === state.enf)); });
-    app.querySelector('#fWallet').checked = state.wallet;
+    app.querySelectorAll('[data-fam]').forEach((x) => { const on = x.dataset.fam === state.fam; x.classList.toggle('on', on); x.setAttribute('aria-pressed', String(on)); });
   }
-  const reset = () => { Object.assign(state, { fam: '', enf: '', wallet: false, q: '' }); app.querySelector('#fQ').value = ''; apply(); };
-
-  app.querySelectorAll('[data-fam]').forEach((x) => x.addEventListener('click', () => { state.fam = x.dataset.fam; apply(); }));
-  app.querySelectorAll('[data-enf]').forEach((x) => x.addEventListener('click', () => { state.enf = state.enf === x.dataset.enf ? '' : x.dataset.enf; apply(); }));
-  app.querySelector('#fWallet').addEventListener('change', (e) => { state.wallet = e.target.checked; apply(); });
+  const reset = () => { Object.assign(state, { fam: '', q: '' }); app.querySelector('#fQ').value = ''; apply(); };
+  app.querySelectorAll('[data-fam]').forEach((x) => x.addEventListener('click', () => { state.fam = state.fam === x.dataset.fam ? '' : x.dataset.fam; apply(); }));
   app.querySelector('#fQ').addEventListener('input', (e) => { state.q = e.target.value.trim().toLowerCase(); apply(); });
   app.querySelector('#clear').addEventListener('click', reset);
 
-  // ── jump to a family (clears filters that would hide it)
-  app.querySelectorAll('[data-jump]').forEach((a) => a.addEventListener('click', (e) => {
-    e.preventDefault();
-    const id = a.dataset.jump;
-    if (state.fam && state.fam !== id || app.querySelector(`#${id}`).hidden) reset();
-    history.replaceState(history.state, '', `${location.search}#${id}`);
-    app.querySelector(`#${id}`).scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }));
-
-  // ── details
+  // ── details: a rule (data-open) or a rule idea (data-see); a click on a card's empty space opens it too
   app.addEventListener('click', (e) => {
+    if (e.target.closest('a')) return;
+    const see = e.target.closest('[data-see]');
+    if (see) { openDetail('custom', { idea: see.dataset.see, opener: see }); return; }
     const t = e.target.closest('[data-open]');
-    if (t) openDetail(t.dataset.open, { opener: t });
+    if (t) { openDetail(t.dataset.open, { opener: t }); return; }
+    const c = e.target.closest('.bk-card');
+    if (c && !e.target.closest('button,input,label')) openDetail(c.dataset.id, { opener: c.querySelector('[data-open]') });
   });
 
   apply();
 
-  // deep links: blocks.html#burn, blocks.html?b=hold-timer
+  // deep links: blocks.html#pace, blocks.html?b=hold-timer, blocks.html?idea=king-of-the-hill
   const hash = location.hash.slice(1);
   let userScrolled = false;
   const mark = () => { userScrolled = true; };
   ['wheel', 'touchmove', 'keydown', 'mousedown'].forEach((ev) => addEventListener(ev, mark, { once: true, passive: true }));
   const jump = () => { if (hash && !userScrolled) document.getElementById(hash)?.scrollIntoView({ block: 'start', behavior: 'instant' }); };
   if (hash) { requestAnimationFrame(jump); document.fonts?.ready.then(jump); addEventListener('load', jump, { once: true }); }
-  const b = q('b');
-  if (b) openDetail(b);
+  const b = q('b'), idea = q('idea');
+  if (idea) openDetail('custom', { idea });
+  else if (b) openDetail(b);
 }

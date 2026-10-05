@@ -9,7 +9,7 @@ import { budget, evaluate, normalize } from '../engine/engine.js';
 import { simulate as runSim, Curve, SUPPLY, rng } from '../engine/sim.js';
 
 const ENV_API = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE) || '';
-export const API_BASE = ENV_API.replace(/\/$/, '');
+export const API_BASE = ENV_API === 'same-origin' ? (typeof location !== 'undefined' ? location.origin : '') : ENV_API.replace(/\/$/, '');
 export const MODE = API_BASE ? 'live' : 'demo';
 const wait = (ms = 120) => new Promise((r) => setTimeout(r, ms));
 const LS = 'hookrz:launches';
@@ -154,8 +154,8 @@ export const api = {
     if (MODE === 'live') return live('/v1/stacks');
     const list = await api.coins();
     return list.filter((c) => !c.parent).map((c) => ({ ...c, family: [c, ...descendantsOf(c.ticker, list)] }))
-      .map((c) => ({ ...c, remixCount: c.family.length - 1, royaltiesSol: c.family.filter((x) => x.parent === c.ticker).reduce((a, x) => a + x.vol24Usd / SOL_USD * 0.01 * 0.10, 0) })) // one level up only
-      .sort((a, b) => b.remixCount - a.remixCount || b.royaltiesSol - a.royaltiesSol);
+      .map((c) => ({ ...c, remixCount: c.family.length - 1 }))
+      .sort((a, b) => b.remixCount - a.remixCount || b.vol24Usd - a.vol24Usd);
   },
 
   async lineage(ticker) {
@@ -223,7 +223,7 @@ export const api = {
       ticker: meta.ticker.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10), name: meta.name, creator: 'you', minutesAgo: 0, progress: 0.002, parent,
       desc: meta.desc || '', stack: normalize(stack), local: true, image: meta.image ?? null,
       stats: { mint: null, // nothing went on chain in this mode, so there is no contract address to show
-       mcapUsd: curveMcapSol(0.002) * SOL_USD, vol24Usd: 0, change24: 0, holders: 1, trades: 1, checked: 1, refused: 0, remixes: 0, royaltiesSol: 0 },
+       mcapUsd: curveMcapSol(0.002) * SOL_USD, vol24Usd: 0, change24: 0, holders: 1, trades: 1, checked: 1, refused: 0, remixes: 0 },
     };
     const list = localLaunches().filter((c) => c.ticker !== coin.ticker);
     try { localStorage.setItem(LS, JSON.stringify([coin, ...list].slice(0, 20))); } catch { /* private mode: coin lives for this page only */ }
@@ -255,7 +255,7 @@ export const api = {
     const list = await api.coins();
     const mine = list.filter((c) => c.creator === handle);
     const remixesOfMine = list.filter((c) => mine.some((m) => m.ticker === c.parent) && c.creator !== handle);
-    return { handle, coins: mine, remixesOfMine, claimableSol: mine.reduce((a, c) => a + c.vol24Usd / SOL_USD * 0.005, 0), royaltiesSol: remixesOfMine.reduce((a, c) => a + c.vol24Usd / SOL_USD * 0.001, 0) };
+    return { handle, coins: mine, remixesOfMine, claimableSol: mine.reduce((a, c) => a + c.vol24Usd / SOL_USD * 0.005, 0) };
   },
 
   /** Live stream (WS in live mode). Demo: replays the coin's simulated log on a timer. Returns an unsubscribe fn. */

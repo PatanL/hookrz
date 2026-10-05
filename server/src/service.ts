@@ -17,6 +17,7 @@ import type { Chain, TxRecord } from "./chain.js";
 import type { HookProgram } from "./hook.js";
 import type { Store, CoinRow, TradeRow } from "./store.js";
 import { Keeper } from "./keeper.js";
+import { BLOCK_IDS } from "./layout.js";
 
 const LAMPORTS = 1e9, RAW = 1e6;
 const SWAP2_HOOK = "swap2WithTransferHook";
@@ -38,6 +39,8 @@ export class Hookrz {
   autoMigrate: boolean;
   private pending = new Map<string, Pending>();
   private drafts = new Map<string, any>();
+  private drafting = 0;
+  private draftQueue = 0;
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(o: ServiceOpts) {
@@ -73,6 +76,10 @@ export class Hookrz {
     ensure(name, "Name required");
     const taken = this.store.findCoin(ticker);
     ensure(!taken, `$${ticker} is taken`, "TICKER_TAKEN");
+    // A coin only launches with rules that are really enforced: hook rules by the deployed engine, curve rules by the
+    // DBC config. Keeper rules (crank) wait for keeper phase 2; never let a rule be dropped silently.
+    const notLive = stack.filter((x: any) => { const bl = byId[x.id]; return bl && ((bl.enforcedBy === "hook" && BLOCK_IDS[x.id] === undefined) || bl.enforcedBy === "crank"); });
+    ensure(!notLive.length, `${notLive.map((x: any) => byId[x.id].name).join(", ")} ${notLive.length > 1 ? "aren't" : "isn't"} enforced on chain yet. Remove ${notLive.length > 1 ? "them" : "it"}, or describe the rule in English instead.`, "RULE_NOT_LIVE");
     const b = budget(stack);
     const creatorKey = body.creator ? new PublicKey(body.creator) : null;
     const buySol = Math.max(0, Number(meta.creatorBuySol ?? body.creatorBuySol ?? 0) || 0);
@@ -478,7 +485,7 @@ export class Hookrz {
       minutesAgo: Math.max(0, Math.round((Date.now() - c.created_at) / 60000)), progress: c.progress, graduated: c.stage === "graduated",
       stage: c.stage, ammPool: c.amm_pool, hookProgram: c.hook_program, raisedSol: c.raised_sol, thresholdSol: c.threshold_sol, priceSol: c.price,
       mcapUsd, vol24Usd: st.vol24Sol * this.solUsd, change24, holders, trades: st.trades, checked: st.trades, refused: st.refused,
-      remixes: list.filter((x) => x.parent === c.ticker).length, royaltiesSol: 0,
+      remixes: list.filter((x) => x.parent === c.ticker).length,
       stack, creatorInfo: { handle: c.creator.slice(0, 4) + "…" + c.creator.slice(-4) }, phase: c.stage === "graduated" ? "graduated" : "curve",
       families: [...new Set(stack.map((x: any) => byId[x.id]?.family))], budget: budget(stack), script: c.script ? { source: c.script.source ?? null, hasBytecode: !!c.script.bytecode } : null,
       launchSig: c.launch_sig, launchTs: c.launch_ts,
@@ -514,8 +521,8 @@ export class Hookrz {
     const list = this.coins();
     const desc = (t: string): any[] => list.filter((c) => c.parent === t).flatMap((c) => [c, ...desc(c.ticker)]);
     return list.filter((c) => !c.parent).map((c) => ({ ...c, family: [c, ...desc(c.ticker)] }))
-      .map((c) => ({ ...c, remixCount: c.family.length - 1, royaltiesSol: c.family.filter((x: any) => x.parent === c.ticker).reduce((a: number, x: any) => a + (x.vol24Usd / this.solUsd) * 0.01 * 0.1, 0) }))
-      .sort((a, b) => b.remixCount - a.remixCount || b.royaltiesSol - a.royaltiesSol);
+      .map((c) => ({ ...c, remixCount: c.family.length - 1 }))
+      .sort((a, b) => b.remixCount - a.remixCount || b.vol24Usd - a.vol24Usd);
   }
   lineage(key: string) {
     const list = this.coins();
@@ -531,7 +538,7 @@ export class Hookrz {
     const list = this.coins();
     const mine = list.filter((c) => c.creator === handle);
     const remixesOfMine = list.filter((c) => mine.some((m) => m.ticker === c.parent) && c.creator !== handle);
-    return { handle, coins: mine, remixesOfMine, claimableSol: 0, royaltiesSol: 0 };
+    return { handle, coins: mine, remixesOfMine, claimableSol: 0 };
   }
   validate(stack: any[]) {
     return budget(stack ?? []);
@@ -556,8 +563,9 @@ export class Hookrz {
     return r;
   }
 
-  /** English → Hookscript (HOOKSCRIPT's drafter: Anthropic API when ANTHROPIC_API_KEY is set, else the offline heuristic;
-   *  every draft is compiled, fuzzed and honeypot-checked before it comes back). HOOKSCRIPT_PROVIDER forces one. */
+  /** English → Hookscript (HOOKSCRIPT's drafter: the local open-source model when HOOKSCRIPT_LLM_URL is set, else Claude
+   *  when ANTHROPIC_API_KEY is set, else the offline heuristic; every draft is compiled, fuzzed and honeypot-checked
+   *  before it comes back). HOOKSCRIPT_PROVIDER forces one. At most HOOKSCRIPT_CONCURRENCY (3) drafts run at once. */
   async draft(prompt: string) {
     ensure(prompt.trim().length >= 4 && prompt.length <= 600, "Describe the rule in a sentence (4–600 characters)");
     const lib = await hookscript();
@@ -567,7 +575,14 @@ export class Hookrz {
     const key = prompt.trim();
     const hit = this.drafts.get(key);
     if (hit) return hit;
-    const d = await drafter(prompt, { provider: (process.env.HOOKSCRIPT_PROVIDER as any) ?? "auto" });
+    const max = Number(process.env.HOOKSCRIPT_CONCURRENCY ?? 3);
+    if (this.drafting + this.draftQueue >= max * 4) throw new AppError("BUSY", "The rule writer is busy right now; try again in a minute", 503);
+    this.draftQueue++;
+    try { while (this.drafting >= max) await new Promise((r) => setTimeout(r, 250)); } finally { this.draftQueue--; }
+    this.drafting++;
+    let d: any;
+    try { d = await drafter(prompt, { provider: (process.env.HOOKSCRIPT_PROVIDER as any) ?? "auto" }); }
+    finally { this.drafting--; }
     if (d?.ok) {
       this.drafts.set(key, d);
       if (this.drafts.size > 500) this.drafts.delete(this.drafts.keys().next().value!);

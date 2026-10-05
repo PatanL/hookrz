@@ -280,4 +280,6 @@ cd web && VITE_API_BASE=http://127.0.0.1:8830 npx vite --host 127.0.0.1 --port 4
 - `scripts/devnet-engine-smoke.ts` (Helius devnet RPC):
   - **Fair Launch** (snipe-shield 60 s / 0.3%, anti-bundle, rising-max): launch txs of 1,165 B + 524 B. The quote said the largest allowed buy was ≈0.0009 SOL. Buys of 0.002 and 0.5 SOL were both **refused on chain with 6001**: `5gfBCH…`, `2dsdW1…`.
   - **King of the Hill (Hookscript)**: launch txs of 1,165 B + 670 B. The king's buy **landed** (`LgowWy…`). The king's sell was **refused on chain with 6128** (`wfBGNK…`).
-- To redeploy: `node scripts/deploy-engine.cjs <rpc> <payer.json> <program-keypair.json> ../programs/hookrz-engine/hookrz_engine.so`. Upgrades need an Upgrade instruction (not written yet).
+- To redeploy: `node scripts/deploy-engine.cjs <rpc> <payer.json> <program-keypair.json> ../programs/hookrz-engine/hookrz_engine.so`.
+- To upgrade in place: the same command with the program id and `--upgrade`. It writes and verifies a buffer, grows program-data first if the new .so is bigger (ExtendProgramChecked, falling back to ExtendProgram), runs Upgrade, then checks program-data byte for byte. Tested on devnet 2026-10-04 with the same binary (sig `599s9Q46…`); it cost about 0.001 SOL in fees, and the buffer rent is refunded.
+- When a multisig holds the authority (mainnet): run `--buffer-only --buffer-authority <multisig>`. It writes the buffer and hands it to the multisig, which then proposes Upgrade itself.

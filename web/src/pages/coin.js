@@ -2,14 +2,14 @@ import '../styles/base.css';
 import '../styles/coin.css';
 import { mountChrome, toast } from '../ui/chrome.js';
 import { voxelSVG } from '../ui/voxel.js';
-import { cube, ICON, EMBLEM } from '../ui/icons.js';
+import { ICON } from '../ui/icons.js';
 import { avatar } from '../ui/avatar.js';
 import { byId } from '../data/blocks.js';
 import { FEES } from '../api/contract.js';
 import { api } from '../api/client.js';
 import { SUPPLY, CURVE } from '../engine/sim.js';
 import { usd, pctS, num, ago, esc, q } from '../core/format.js';
-import { installTips, handleOf, shortKey, copyText, chg, sol, SOL_USD, testChip } from '../ui/coin-shared.js';
+import { installTips, handleOf, shortKey, copyText, chg, sol, SOL_USD, testChip, pxTile, ruleName } from '../ui/coin-shared.js';
 import { presetCards } from '../ui/coin-presets.js';
 import { lineageTree } from '../ui/coin-lineage.js';
 import { buildHistory, mountChart, TIMEFRAMES } from '../ui/coin-chart.js';
@@ -74,14 +74,14 @@ async function boot() {
           ${coin.desc ? `<p class="cn-desc">${esc(coin.desc)}</p>` : ''}
         </div>
         <div class="cn-act">
-          <a class="btn btn-chrome" href="build.html?remix=${encodeURIComponent(coin.ticker)}">${ICON.remix}Remix this stack</a>
+          <a class="btn btn-chrome" href="build.html?remix=${encodeURIComponent(coin.ticker)}" data-tip="Launch your own coin with the same rules">${ICON.remix}Remix these rules</a>
           <div class="cn-share">
             <button class="btn btn-glass" id="share"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 10V2M4.5 5.5 8 2l3.5 3.5M3 9v5h10V9"/></svg>Share</button>
-            <a class="btn btn-glass cn-x" href="https://x.com/intent/tweet?text=${encodeURIComponent(`$${coin.ticker} runs a ${coin.stack.length}-block stack on hookrz.fun`)}&via=hookrzfun&url=${encodeURIComponent(location.href)}" target="_blank" rel="noopener" aria-label="Post on X">${ICON.x}</a>
+            <a class="btn btn-glass cn-x" href="https://x.com/intent/tweet?text=${encodeURIComponent(`$${coin.ticker} trades by ${coin.stack.length} rule${coin.stack.length === 1 ? '' : 's'} the chain enforces, on hookrz.fun`)}&via=hookrzfun&url=${encodeURIComponent(location.href)}" target="_blank" rel="noopener" aria-label="Post on X">${ICON.x}</a>
           </div>
         </div>
       </div>
-      ${risky.length ? `<div class="cn-risk">${risky.map(({ s, b }) => `<div>${cube(b.family, { size: 22, state: 'refused' })}<span><b>${esc(b.name)}</b> ${esc(riskLine(b, s, coin))}</span></div>`).join('')}</div>` : ''}
+      ${risky.length ? `<div class="cn-risk">${risky.map(({ s, b }) => `<div>${pxTile(b.family, { size: 24, state: 'refused' })}<span><b>${esc(ruleName(b))}</b> ${esc(riskLine(b, s, coin))}</span></div>`).join('')}</div>` : ''}
       <div class="cn-stats">${statCells(coin)}</div>
     </div>
   </section>
@@ -99,7 +99,7 @@ async function boot() {
             <div class="seg" id="tf">${TIMEFRAMES.map(([k, ms]) => `<button data-tf="${k}" ${ms !== Infinity && ms > hist.ageMs * 1.05 && k !== '1H' ? 'disabled' : ''}>${k}</button>`).join('')}</div>
           </div>
           <div id="chart"></div>
-          <div class="cn-ch-leg"><span><i class="lg-line"></i>Market cap</span><span><i class="lg-vol"></i>Volume</span><span><i class="lg-ref"></i>Refused transfers</span>${hist.gradAt ? '<span><i class="lg-grad"></i>Graduation</span>' : ''}</div>
+          <div class="cn-ch-leg"><span><i class="lg-line"></i>Market cap</span><span><i class="lg-vol"></i>Volume</span><span><i class="lg-ref"></i>Blocked trades</span>${hist.gradAt ? '<span><i class="lg-grad"></i>Graduation</span>' : ''}</div>
         </div>
         <div class="panel cn-stack" id="stackP"></div>
         <div class="panel cn-feed" id="feedP"></div>
@@ -136,7 +136,7 @@ async function boot() {
       $('#tfChg').textContent = pctS(c);
       $('#tfChg').className = `num ${c >= 0 ? 'up' : 'down'}`;
       $('#tfLbl').textContent = k === 'ALL' ? 'since launch' : `past ${k.toLowerCase().replace('h', ' hours').replace('1 hours', 'hour')}`;
-      $('#tfPx').textContent = `· ${s.refused} refused in view`;
+      $('#tfPx').textContent = `· ${s.refused} blocked in view`;
       const lg = app.querySelector('.lg-grad'); if (lg) lg.parentElement.style.display = s.grad ? '' : 'none';
     },
   });
@@ -156,7 +156,7 @@ async function boot() {
   mountFeed($('#feedP'), coin);
   renderLineage($('#linP'), coin, lineage, parent, children);
   renderHolders($('#holdP'), coin, holders);
-  renderFees($('#feesP'), coin, parent, children);
+  renderFees($('#feesP'), coin);
 }
 
 function riskLine(b, s, coin) {
@@ -164,7 +164,7 @@ function riskLine(b, s, coin) {
     const prog = coin.progress * 100;
     return prog < s.params.pct ? `Holders cannot sell until the curve is ${s.params.pct}% filled. It is ${prog.toFixed(1)}% filled now.` : `Sells opened when the curve passed ${s.params.pct}%.`;
   }
-  if (b.power) return `The creator can block addresses from holding this coin. The list freezes ${s.params.lockAt}.`;
+  if (b.power) return `The creator can ban wallets from holding this coin. The list freezes ${s.params.lockAt}.`;
   return b.risk;
 }
 
@@ -177,22 +177,21 @@ function statCells(c) {
     <div class="cs"><span class="k">Market cap</span><span class="v num">${usd(c.mcapUsd)}</span><span class="s num ${ch > 0.05 ? 'up' : ch < -0.05 ? 'down' : ''}">${pctS(ch)} 24h</span></div>
     <div class="cs"><span class="k">24h volume</span><span class="v num">${usd(c.vol24Usd)}</span><span class="s num">${sol(c.vol24Usd / SOL_USD)}</span></div>
     <div class="cs"><span class="k">Holders</span><span class="v num">${num(c.holders)}</span><span class="s">${grad ? 'wallets' : 'wallets on the curve'}</span></div>
-    <div class="cs"><span class="k">Checked</span><span class="v num">${num(c.checked)}</span><span class="s">transfers, on chain</span></div>
-    <div class="cs ref"><span class="k">Refused</span><span class="v num">${num(c.refused)}</span><span class="s num">${ref.toFixed(1)}% of transfers</span></div>
+    <div class="cs"><span class="k">Trades checked</span><span class="v num">${num(c.checked)}</span><span class="s">by the chain</span></div>
+    <div class="cs ref"><span class="k">Blocked</span><span class="v num">${num(c.refused)}</span><span class="s num">${ref.toFixed(1)}% of trades</span></div>
     <div class="cs curve">${grad
-    ? `<span class="k">Graduated</span><span class="v cs-grad">Trading on Meteora DAMM v2</span><div class="cbar"><i style="width:100%"></i></div><span class="s">Curve filled at ${GRAD_SOL} SOL · hook retired</span>`
+    ? `<span class="k">Graduated</span><span class="v cs-grad">Trading on Meteora DAMM v2</span><div class="cbar"><i style="width:100%"></i></div><span class="s">Curve filled at ${GRAD_SOL} SOL · trade rules retired</span>`
     : `<span class="k">Curve</span><span class="v num">${(c.progress * 100).toFixed(1)}%</span><div class="cbar ticks"><i style="width:${Math.max(1, c.progress * 100)}%"></i></div><span class="s num">${raised.toFixed(1)} / ${GRAD_SOL} SOL · graduates at ${GRAD_SOL} SOL</span>`}</div>`;
 }
 
 function renderLineage(el, coin, tree, parent, children) {
-  const author = handleOf(coin);
   el.innerHTML = `
-    <div class="ph"><h3>Remix lineage <span class="pk">${plural(tree ? countNodes(tree) : 1, 'coin')} on this stack family</span></h3><a class="btn btn-glass btn-sm" href="stacks.html">All stacks</a></div>
+    <div class="ph"><h3>Remixes <span class="pk">${plural(tree ? countNodes(tree) : 1, 'coin')} with these rules</span></h3><a class="btn btn-glass btn-sm" href="stacks.html">All remixes</a></div>
     <div class="cn-lin-body">
-      <p class="cn-roy">${cube('crown', { size: 26 })}<span><b>${esc(author)}</b> earns 10% of the trade fee on remixes of this stack, one level up.${parent ? ` This coin remixes <a href="coin.html?t=${encodeURIComponent(parent.ticker)}" class="mono">$${esc(parent.ticker)}</a>, so 10% of its fee goes to <b>${esc(handleOf(parent))}</b>.` : ' This is an original stack, so its creator keeps that 10% too.'}</span></p>
+      ${parent ? `<p class="cn-roy">${pxTile('arrow', { size: 26 })}<span>$${esc(coin.ticker)} reused the rules of <a href="coin.html?t=${encodeURIComponent(parent.ticker)}" class="mono">$${esc(parent.ticker)}</a>. Here is everything launched from the same rules, and what each one changed.</span></p>` : ''}
       ${tree ? lineageTree(tree, { current: coin.ticker }) : ''}
       <div class="cn-lin-cta">
-        <span class="dim">${children.length ? `${children.length} coin${children.length > 1 ? 's' : ''} launched on this stack.` : 'Nobody has remixed this stack yet.'} Remixing copies every block and param; change what you want and launch.</span>
+        <span class="dim">${children.length ? `${children.length} coin${children.length > 1 ? 's' : ''} reused these rules.` : 'Nobody has remixed these rules yet.'} A remix copies every rule and setting into a new launch; change what you want and launch.</span>
         <a class="btn btn-chrome btn-sm" href="build.html?remix=${encodeURIComponent(coin.ticker)}">${ICON.remix}Remix $${esc(coin.ticker)}</a>
       </div>
     </div>`;
@@ -213,7 +212,7 @@ function renderHolders(el, coin, holdersIn) {
       <thead><tr><th>#</th><th>Wallet</th><th>Share</th></tr></thead>
       <tbody>${holders.map((h, i) => `<tr>
         <td class="num dim">${i + 1}</td>
-        <td class="cn-hw">${h.creator ? `<span class="mono">${esc(handleOf(coin))}</span><span class="chip">Creator</span>` : `<span class="mono">${shortKey(h.wallet)}</span>`}${h.tier === 'crown' && crown ? `<span class="chip ice cn-crown" data-tip="Diamond Tiers crown: this wallet has never sold">${EMBLEM.crown}Crown</span>` : ''}</td>
+        <td class="cn-hw">${h.creator ? `<span class="mono">${esc(handleOf(coin))}</span><span class="chip">Creator</span>` : `<span class="mono">${shortKey(h.wallet)}</span>`}${h.tier === 'crown' && crown ? `<span class="chip ice cn-crown" data-tip="Diamond Tiers crown: this wallet has never sold">${pxTile('crown', { size: 16 })}Crown</span>` : ''}</td>
         <td><span class="cn-share"><span class="cn-sbar"><i style="width:${(h.share / max) * 100}%"></i></span><span class="num">${(h.share * 100).toFixed(2)}%</span></span></td>
       </tr>`).join('')}
       ${p.tokens > 0 ? `<tr class="you"><td class="num">—</td><td><span class="chip solid">You</span></td><td><span class="cn-share"><span class="cn-sbar"><i style="width:${Math.min(100, (p.tokens / SUPPLY / max) * 100)}%"></i></span><span class="num">${(p.tokens / SUPPLY * 100).toFixed(3)}%</span></span></td></tr>` : ''}
@@ -222,22 +221,16 @@ function renderHolders(el, coin, holdersIn) {
     ${holders[0]?.creator ? `<p class="cn-hnote dim">Only the creator's launch buy so far. Wallets show up here as they buy $${esc(coin.ticker)}.</p>` : ''}`;
 }
 
-function renderFees(el, coin, parent, children) {
+function renderFees(el, coin) {
   const fee24 = coin.vol24Usd * FEES.tradeFeePct / 100;
-  const share = (who) => FEES.split.find((s) => s.who === who).pct / 100;
-  const creatorPct = share('Creator') + (parent ? 0 : share('Stack author'));
-  const royaltyIn = children.reduce((a, c) => a + c.vol24Usd * FEES.tradeFeePct / 100 * share('Stack author'), 0);
+  const tone = (who) => (who === 'Creator' ? 'cr' : 'pl');
   const line = (k, usdV, note = '', cls = '') => `<div class="fe-row ${cls}"><span class="fe-k">${k}${note ? `<small>${note}</small>` : ''}</span><span class="fe-v num">${sol(usdV / SOL_USD)}<small>${usd(usdV)}</small></span></div>`;
   el.innerHTML = `
     <div class="ph"><h3>Fees <span class="pk">last 24h</span></h3><span class="dim num fe-tot">${sol(fee24 / SOL_USD)} in fees</span></div>
     <div class="fe-body">
-      <div class="fe-split">${FEES.split.map((s) => `<span class="fe-seg ${s.who === 'Stack author' ? 'auth' : s.who === 'Creator' ? 'cr' : 'pl'}" style="flex:${s.pct}" data-tip="${esc(s.who)}: ${esc(s.note)}"><b>${s.pct}%</b></span>`).join('')}</div>
-      <div class="fe-leg"><span><i class="cr"></i>Creator</span><span><i class="pl"></i>hookrz</span><span><i class="auth"></i>${parent ? `Stack author ${esc(handleOf(parent))}` : 'Stack author (the creator, on an original)'}</span></div>
-      <p class="fe-note dim">Every trade pays a ${FEES.tradeFeePct}% fee, split three ways.</p>
-      ${line(`Creator ${esc(handleOf(coin))}`, fee24 * creatorPct, `${Math.round(creatorPct * 100)}% of the fee${parent ? '' : ', royalty included'}`, 'hi')}
-      ${parent ? line(`Royalty to ${esc(handleOf(parent))}`, fee24 * share('Stack author'), `author of $${esc(parent.ticker)}'s stack`) : ''}
-      ${line('hookrz', fee24 * share('hookrz'), 'engine audits, keeper gas, API')}
-      ${line('Royalties in from remixes', royaltyIn, children.length ? `${children.length} remix${children.length > 1 ? 'es' : ''} pay ${esc(handleOf(coin))} 10% of their fee` : 'no remixes yet', royaltyIn ? 'in' : '')}
+      <div class="fe-split">${FEES.split.map((s) => `<span class="fe-seg ${tone(s.who)}" style="flex:${s.pct}" data-tip="${esc(s.who)}: ${esc(s.note)}"><b>${s.pct}%</b>${esc(s.who === 'Creator' ? 'creator' : s.who)}</span>`).join('')}</div>
+      <p class="fe-note dim">Every trade pays a ${FEES.tradeFeePct}% fee, split ${FEES.split.length === 2 ? 'two' : FEES.split.length} ways.</p>
+      ${FEES.split.map((s) => line(s.who === 'Creator' ? `Creator ${esc(handleOf(coin))}` : esc(s.who), fee24 * s.pct / 100, s.who === 'Creator' ? `${s.pct}% of the fee` : `${s.pct}% of the fee · engine audits, keeper, API`, s.who === 'Creator' ? 'hi' : '')).join('')}
     </div>`;
 }
 
@@ -246,11 +239,11 @@ async function notFound() {
   const all = await api.coins({ sort: 'volume' });
   app.innerHTML = `<section class="cn-nf"><div class="wrap">
     <div class="panel cn-nf-box">
-      <div class="cn-nf-cubes">${cube('x', { size: 40, state: 'empty' })}${cube('guard', { size: 40 })}${cube('x', { size: 40, state: 'empty' })}</div>
+      <div class="cn-nf-cubes">${pxTile('x', { size: 40, state: 'empty' })}${pxTile('guard', { size: 40 })}${pxTile('x', { size: 40, state: 'empty' })}</div>
       <span class="eyebrow">No coin at this ticker</span>
       <h1 class="cn-nf-h">$${esc(T)} hasn't launched</h1>
-      <p class="lede">Nothing on hookrz trades under $${esc(T)}. Check the ticker, or build it.</p>
-      <div class="cn-nf-cta"><a class="btn btn-chrome" href="build.html">Build a coin</a><a class="btn btn-glass" href="coins.html">Browse coins</a></div>
+      <p class="lede">Nothing on hookrz trades under $${esc(T)}. Check the ticker, or launch it.</p>
+      <div class="cn-nf-cta"><a class="btn btn-chrome" href="build.html">Launch a coin</a><a class="btn btn-glass" href="coins.html">Browse coins</a></div>
       ${all.length
     ? `<div class="cn-nf-list"><span class="pk">Launched coins</span>${all.slice(0, 6).map((c) => `<a href="coin.html?t=${encodeURIComponent(c.ticker)}">${avatar(c, 26)}<span class="mono">$${esc(c.ticker)}</span>${testChip(c)}<span class="dim num">${usd(c.mcapUsd)}</span></a>`).join('')}</div>`
     : ''}
@@ -264,14 +257,14 @@ function noCoins() {
   document.title = 'Coins · hookrz';
   app.innerHTML = `<section class="cn-nf"><div class="wrap">
     <div class="panel cn-nf-box">
-      <div class="cn-nf-cubes">${cube('x', { size: 40, state: 'empty' })}${cube('x', { size: 40, state: 'empty' })}${cube('x', { size: 40, state: 'empty' })}</div>
+      <div class="cn-nf-cubes">${['guard', 'pace', 'crown'].map((f) => pxTile(f, { size: 40 })).join('')}</div>
       <span class="eyebrow">Coin page</span>
       <h1 class="cn-nf-h">No coins yet</h1>
-      <p class="lede">Every coin gets a page here with its chart, its stack and every transfer the engine checks. Launch the first one.</p>
-      <div class="cn-nf-cta"><a class="btn btn-chrome" href="build.html">Build a coin</a><a class="btn btn-glass" href="coins.html">Coins</a></div>
+      <p class="lede">Every coin gets a page here with its chart, its rules and every trade they check. Launch the first one.</p>
+      <div class="cn-nf-cta"><a class="btn btn-chrome" href="build.html">Launch the first coin</a><a class="btn btn-glass" href="coins.html">Coins</a></div>
     </div>
     ${starters()}
   </div></section>`;
 }
 
-const starters = () => `<div class="cn-nf-starters"><div class="cn-nf-sh"><h3>Starter stacks</h3><span class="dim">Open one in Build, tune it, launch.</span></div>${presetCards({ compact: true })}</div>`;
+const starters = () => `<div class="cn-nf-starters"><div class="cn-nf-sh"><h3>Rulebooks</h3><span class="dim">Pick one, name your coin, launch.</span></div>${presetCards({ compact: true })}</div>`;

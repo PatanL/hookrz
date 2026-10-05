@@ -28,7 +28,7 @@ export function archDiagram() {
     ${node('n-t22', 'Program', 'Token-2022', 'Moves the coin, calls the hook')}
     ${arrow('Execute')}
     ${node('n-engine', 'Program', 'hookrz_engine', 'Runs the stack. Can only refuse.')}
-    ${off('a-keeper', svc.keeper, 'Claims fee vaults, buys back and burns, pays rewards and royalties', '↑ public crank txs')}
+    ${off('a-keeper', svc.keeper, 'Claims fee vaults, buys back and burns, pays rewards', '↑ public crank txs')}
     ${off('a-idx', svc.indexer, 'Coins, trades, verdicts and lineage into Postgres; the live stream', '↑ follows engine, DBC, DAMM v2')}
   </figure>`;
 }
@@ -50,7 +50,7 @@ export const STACK_LAYOUT = rows([
   ['pool', 'Pubkey', 32, 'Meteora DBC virtual pool', 'k'],
   ['base_vault', 'Pubkey', 32, 'DBC base vault. Out of it = buy, into it = sell', 'k'],
   ['parent_stack', 'Pubkey', 32, 'The Stack this one remixed; zero for an original', 'k'],
-  ['parent_author', 'Pubkey', 32, 'Creator of the parent Stack, copied at init: the royalty receiver', 'k'],
+  ['parent_author', 'Pubkey', 32, 'Creator of the parent Stack, copied at init (lineage)', 'k'],
   ['launch_slot', 'u64', 8, 'Slot of init_stack: time zero for every block', 't'],
   ['launch_ts', 'i64', 8, 'Unix time of init_stack', 't'],
   [`slots[${ENGINE.maxSlots}]`, '[Slot; 6]', ENGINE.maxSlots * 58, `${ENGINE.maxSlots} × 58 bytes, run in order`, 's'],

@@ -1,11 +1,18 @@
 /* Components shared by coins / coin / stacks pages (imported by src/ui/coin-shared.js). */
 
-/* mini stack of cubes */
+/* pixel rule tile (coin-shared.js pxTile): a family's pixel icon on a notched square */
+.pxt { --pt: 28px; --st: 2px; width: var(--pt); height: var(--pt); flex: none; display: inline-grid; place-items: center; color: var(--chrome-1);
+  background: linear-gradient(180deg, rgba(143,202,255,.13), rgba(143,202,255,.04)); box-shadow: inset 0 0 0 1px rgba(143,202,255,.24), inset 0 1px 0 rgba(255,255,255,.12);
+  clip-path: polygon(0 var(--st), var(--st) var(--st), var(--st) 0, calc(100% - var(--st)) 0, calc(100% - var(--st)) var(--st), 100% var(--st), 100% calc(100% - var(--st)), calc(100% - var(--st)) calc(100% - var(--st)), calc(100% - var(--st)) 100%, var(--st) 100%, var(--st) calc(100% - var(--st)), 0 calc(100% - var(--st))); }
+.pxt svg { display: block; image-rendering: pixelated; }
+.pxt.lit { color: #fff; background: linear-gradient(180deg, rgba(143,202,255,.3), rgba(77,155,255,.12)); box-shadow: inset 0 0 0 1px rgba(143,202,255,.7), inset 0 0 10px rgba(143,202,255,.3); }
+.pxt.refused { color: var(--refuse); background: linear-gradient(180deg, rgba(255,98,87,.22), rgba(255,98,87,.08)); box-shadow: inset 0 0 0 1px rgba(255,98,87,.65); }
+.pxt.empty { background: rgba(255,255,255,.02); box-shadow: inset 0 0 0 1px var(--line-2); }
+.pxt.off { opacity: .45; filter: grayscale(1); }
+
+/* mini row of rule tiles */
 .mstack { display: inline-flex; align-items: center; gap: var(--mg, 4px); flex-wrap: nowrap; }
 .mcube { display: inline-flex; cursor: default; }
-.mcube .cube { box-shadow: inset 1px 1px 0 rgba(255,255,255,.95), inset -2px -2px 0 rgba(52,70,104,.45); }
-.mcube .cube svg { width: 58%; height: 58%; }
-.mcube .cube::after { inset: 14%; }
 
 /* family emblem glyph */
 .emb { display: inline-grid; place-items: center; width: 14px; height: 14px; color: var(--ice); flex: none; }
@@ -97,26 +104,21 @@
   background: rgba(143,202,255,.06); color: var(--ice); font-family: var(--font-pixel); font-size: 9px; letter-spacing: .08em; text-transform: uppercase;
   line-height: 1; white-space: nowrap; cursor: default; position: relative; z-index: 2; }
 
-/* starter stack cards (coin-presets.js) */
+/* rulebook cards (coin-presets.js) */
 .pcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: 12px; }
-.pcard { position: relative; display: flex; flex-direction: column; gap: 12px; padding: 16px; min-width: 0; text-align: left;
+.pcard { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 18px; min-width: 0; text-align: left;
   border: 1px solid var(--line); border-radius: var(--r-3); background: var(--panel); box-shadow: inset 0 1px 0 var(--line-hi);
   transition: border-color .15s, transform .15s, box-shadow .15s; }
 .pcard:hover { border-color: rgba(143,202,255,.42); transform: translateY(-2px); box-shadow: inset 0 1px 0 var(--line-hi), 0 22px 50px -28px rgba(77,155,255,.45); }
-.pc-top { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.pc-top b { font-size: 16px; font-weight: 800; font-variation-settings: 'wdth' 114; letter-spacing: -.01em; color: var(--text); }
-.pc-n { font-size: 11px; color: var(--text-3); white-space: nowrap; }
-.pc-blurb { font-size: 13px; line-height: 1.45; color: var(--text-2); min-height: 2.9em; }
-.pc-mid { display: flex; align-items: center; min-height: 26px; }
-.pc-cu { display: flex; flex-direction: column; gap: 6px; padding-top: 12px; border-top: 1px solid var(--line); }
-.pc-cu-l { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; color: var(--text); white-space: nowrap; }
-.pc-cu .pk { font-family: var(--font-pixel); font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
-.pc-bar { height: 4px; background: rgba(255,255,255,.06); }
-.pc-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--ice-2), var(--ice)); box-shadow: 0 0 8px rgba(77,155,255,.6); }
-.pc-go { display: inline-flex; align-items: center; gap: 7px; margin-top: auto; font-size: 13px; font-weight: 700; color: var(--ice); }
+.pc-top { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin-top: 4px; }
+.pc-top b { font-size: 17px; font-weight: 800; font-variation-settings: 'wdth' 114; letter-spacing: -.01em; color: var(--text); }
+.pc-n { font-family: var(--font-pixel); font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); white-space: nowrap; }
+.pc-blurb { font-size: 13.5px; line-height: 1.5; color: var(--text-2); }
+.pc-mid { display: flex; align-items: center; min-height: 28px; }
+.pc-go { display: inline-flex; align-items: center; gap: 7px; margin-top: auto; padding-top: 6px; font-size: 13.5px; font-weight: 700; color: var(--ice); }
 .pc-go svg { transition: transform .15s; }
 .pcard:hover .pc-go svg { transform: translateX(3px); }
-.pcards.compact .pcard { padding: 14px; gap: 10px; }
-.pcards.compact .pc-blurb { font-size: 12.5px; }
+.pcards.compact .pcard { padding: 15px; gap: 8px; }
+.pcards.compact .pc-blurb { font-size: 13px; }
 [hidden] { display: none !important; }
 @media (max-width: 640px) { .pc-blurb { min-height: 0; } }

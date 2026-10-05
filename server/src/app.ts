@@ -21,13 +21,26 @@ export function buildApp(svc: Hookrz, o: { info?: any } = {}) {
     return reply.status(500).send({ error: "INTERNAL", message: e.message });
   });
 
-  // naive per-IP limiter for the writes (prepare / submit / relay): 120 a minute
+  // Behind the Cloudflare tunnel every request arrives from loopback: the visitor is in cf-connecting-ip.
+  // Only trusted when the socket itself is loopback (cloudflared on this box), never from the open internet.
+  const clientIp = (req: any) => {
+    const ip = req.ip as string;
+    const loop = ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
+    const cf = req.headers["cf-connecting-ip"];
+    return loop && typeof cf === "string" && cf ? cf : ip;
+  };
+  // naive per-IP limiters: writes (prepare / submit / relay) 120 a minute; English → Hookscript drafts 10 a minute
   const hits = new Map<string, { n: number; t: number }>();
+  const limit = (key: string, max: number) => {
+    const now = Date.now(), h = hits.get(key);
+    if (!h || now - h.t > 60_000) { hits.set(key, { n: 1, t: now }); if (hits.size > 50_000) hits.clear(); return false; }
+    return ++h.n > max;
+  };
   app.addHook("onRequest", async (req, reply) => {
     if (req.method !== "POST") return;
-    const now = Date.now(), k = req.ip, h = hits.get(k);
-    if (!h || now - h.t > 60_000) hits.set(k, { n: 1, t: now });
-    else if (++h.n > 120) return reply.status(429).send({ error: "RATE_LIMITED", message: "Too many requests; slow down" });
+    const ip = clientIp(req);
+    if (limit(ip, 120) || (req.url.startsWith("/v1/hookscript/draft") && limit(`draft:${ip}`, 10)))
+      return reply.status(429).send({ error: "RATE_LIMITED", message: "Too many requests; slow down" });
   });
 
   app.get("/v1/health", async () => {
@@ -53,7 +66,7 @@ export function buildApp(svc: Hookrz, o: { info?: any } = {}) {
   app.post("/v1/launch/prepare", async (req: any) => json(await svc.prepareLaunch(req.body ?? {})));
   app.post("/v1/launch/submit", async (req: any) => json(await svc.submitLaunch(req.body ?? {})));
   app.get("/v1/creators/:wallet", async (req: any) => json(svc.creator(req.params.wallet)));
-  app.post("/v1/fees/claim/prepare", async (_req, reply) => reply.status(501).send({ error: "NOT_YET", message: "Fee and royalty claims arrive with the keeper (phase 2)" }));
+  app.post("/v1/fees/claim/prepare", async (_req, reply) => reply.status(501).send({ error: "NOT_YET", message: "Fee claims arrive with the keeper (phase 2)" }));
   app.get("/v1/keeper", async () => json(svc.keeper.log.slice(0, 100)));
 
   // signed transaction relay: the fork has no public RPC, and on devnet this indexes refusals immediately

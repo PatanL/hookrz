@@ -1,5 +1,5 @@
 // Build page: the live budget column — compute, accounts, rent, route, enforcers, warnings,
-// what happens at graduation, and the fee split with the royalty recipient.
+// what happens at graduation, and the fee split (from FEES in src/api/contract.js).
 import { ENFORCERS, ENGINE, byId, rentSol } from '../data/blocks.js';
 import { FEES } from '../api/contract.js';
 import { cube } from './icons.js';
@@ -31,7 +31,6 @@ export function budgetHTML(S, c) {
     ...hooks.map((h) => `<i class="seg" style="width:${cuPct(h.cu)}%" title="${esc(h.name)}: ${h.cu.toLocaleString('en-US')} CU"></i>`)].join('') : '';
   const pips = Array.from({ length: b.maxAccounts }, (_, i) => `<i class="${i < b.accounts.length ? 'on' : ''}${i === 0 && b.accounts.length ? ' stack' : ''}"></i>`).join('');
   const rec = rentSol(ENGINE.walletRecordBytes);
-  const parent = S.parent;
 
   // lifetime: who runs when
   const blocks = S.stack.map((s) => byId[s.id]);
@@ -40,8 +39,6 @@ export function budgetHTML(S, c) {
   const fixed = blocks.filter((x) => (x.enforcedBy === 'curve' || x.enforcedBy === 'ext'));
   const cubes = (list) => list.length ? list.map((x) => cube(x.family, { size: 18, title: x.name })).join('') : '<span class="dim">none</span>';
 
-  const royaltyTo = parent ? `@${esc(parent.handle)}` : 'You';
-  const royaltyWhy = parent ? `author of $${esc(parent.ticker)}'s stack` : 'original stack: you keep it';
 
   return `<div class="bud-in">
   <div class="bud-head"><span class="eyebrow">Budget</span><span class="bud-status ${status[0]}" role="status">${status[0] === 'ok' ? '<i class="dot"></i>' : status[0] === 'bad' ? '<i class="dot refuse"></i>' : ''}${status[1]}</span></div>
@@ -80,12 +77,13 @@ export function budgetHTML(S, c) {
 
   <div class="fees">
     <div class="sub pixel">Fee split · ${FEES.tradeFeePct}% of every trade</div>
-    <div class="fee-bar" aria-hidden="true">${FEES.split.map((f, i) => `<i class="f${i}${i === 2 ? ' roy' : ''}" style="width:${f.pct}%"></i>`).join('')}</div>
+    <div class="fee-bar" aria-hidden="true">${FEES.split.map((f, i) => `<i class="f${i}" style="width:${f.pct}%"></i>`).join('')}</div>
     <ul class="fee-rows">
       ${FEES.split.map((f, i) => {
-        const to = i === 0 ? 'You' : i === 1 ? 'hookrz' : royaltyTo;
-        const sub = i === 0 ? 'Claimed from the DBC pool' : i === 1 ? 'Engine audits, keeper gas, the API' : royaltyWhy;
-        return `<li class="${i === 2 ? 'roy' : ''}${i === 0 || (i === 2 && !parent) ? ' you' : ''}"><i class="sw f${i}"></i><span class="fr-who">${f.who}<span>${sub}</span></span><span class="fr-to">${to}</span><span class="fr-pct mono">${f.pct}%<span>${((FEES.tradeFeePct * f.pct) / 100).toFixed(2)}% of volume</span></span></li>`;
+        const you = /creator/i.test(f.who);
+        const to = you ? 'You' : esc(f.who);
+        const sub = esc(f.note ?? '');
+        return `<li class="${you ? 'you' : ''}"><i class="sw f${i}"></i><span class="fr-who">${f.who}<span>${sub}</span></span><span class="fr-to">${to}</span><span class="fr-pct mono">${f.pct}%<span>${((FEES.tradeFeePct * f.pct) / 100).toFixed(2)}% of volume</span></span></li>`;
       }).join('')}
     </ul>
   </div>

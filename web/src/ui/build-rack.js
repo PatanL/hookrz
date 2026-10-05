@@ -1,6 +1,6 @@
-// Build page: header + presets, remix bar, block palette, the rack, and the selected block's editor.
+// Launch page, "Customize rules": the remix bar, block palette, the rack, and the selected block's editor.
 // Pure render functions (state in → HTML out); build.js owns the state and the events.
-import { FAMILIES, ENFORCERS, ENGINE, BLOCKS, PRESETS, byId, familyOf, hex } from '../data/blocks.js';
+import { FAMILIES, ENFORCERS, ENGINE, BLOCKS, byId, familyOf, hex } from '../data/blocks.js';
 import { cube, ICON } from './icons.js';
 import { voxelSVG, asset } from './voxel.js';
 import { avatar } from './avatar.js';
@@ -24,33 +24,6 @@ export const blockImg = (family, big = false) => asset(`img/brand/block-${family
 /** Stack params → the one-line summary the rack shows. */
 export const summaryOf = (s) => { try { return byId[s.id].summary(s.params); } catch { return ''; } };
 
-// ───────────────────────── header + presets ─────────────────────────
-export function headHTML(S) {
-  const ids = S.stack.map((s) => s.id).join(',');
-  const active = PRESETS.find((p) => p.slots.map((x) => x[0]).join(',') === ids)?.id;
-  return `
-  <div class="b-title">
-    <span class="eyebrow">Build a coin</span>
-    <h1><span class="chrome-text">Snap the rules in.</span></h1>
-    <p class="lede">Up to six blocks in one stack. A single audited program, <span class="mono">hookrz_engine</span>, runs the whole stack on every transfer and refuses what your rules refuse.</p>
-  </div>
-  <div class="presets" id="presets">
-    <div class="presets-head"><span class="pixel">Presets</span><span class="dim">Start from a proven stack, then tune it.</span></div>
-    <div class="presets-row" role="list">
-      ${PRESETS.map((p) => `<button class="preset${active === p.id ? ' on' : ''}" role="listitem" data-act="preset" data-id="${p.id}" data-fk="preset-${p.id}" aria-pressed="${active === p.id}">
-        <span class="preset-cubes">${p.slots.map(([id]) => cube(byId[id].family, { size: 18 })).join('')}</span>
-        <b>${p.name}</b><span class="preset-blurb">${p.blurb}</span>
-        <span class="preset-n mono">${p.slots.length} blocks${active === p.id ? ' · loaded' : ''}</span>
-      </button>`).join('')}
-      <button class="preset empty" role="listitem" data-act="empty" data-fk="preset-empty"${!S.stack.length && !S.parent ? ' aria-pressed="true"' : ''}>
-        <span class="preset-cubes">${Array.from({ length: 3 }, () => cube('x', { size: 18, state: 'empty' })).join('')}</span>
-        <b>Start empty</b><span class="preset-blurb">Six open slots. Pick every block yourself.</span>
-        <span class="preset-n mono">0 blocks</span>
-      </button>
-    </div>
-  </div>`;
-}
-
 // ───────────────────────── remix bar ─────────────────────────
 export function remixBarHTML(S, c) {
   if (!S.parent) return '';
@@ -66,8 +39,8 @@ export function remixBarHTML(S, c) {
     <div class="rb-who">
       ${avatar(P.coin ?? { ticker: P.ticker }, 42)}
       <div class="rb-txt">
-        <div class="rb-line"><span class="rb-ico" aria-hidden="true">${ICON.remix}</span>Remixing <a href="coin.html?t=${esc(P.ticker)}">$${esc(P.ticker)}</a> by <b>@${esc(P.handle)}</b> — they earn the 10% stack royalty</div>
-        <div class="rb-sub dim">The royalty is 10% of the 1% trade fee on your coin, paid to the parent stack's author, one level up only. Your coin's lineage links back to $${esc(P.ticker)}.</div>
+        <div class="rb-line"><span class="rb-ico" aria-hidden="true">${ICON.remix}</span>Remixing <a href="coin.html?t=${esc(P.ticker)}">$${esc(P.ticker)}</a> by <b>@${esc(P.handle)}</b></div>
+        <div class="rb-sub dim">You're starting from its stack. Your coin's lineage links back to $${esc(P.ticker)}.</div>
       </div>
     </div>
     <div class="rb-diff" aria-live="polite">
@@ -175,7 +148,7 @@ export function editorHTML(S, c) {
     return `<div class="ed-empty">
       <div class="ed-empty-cubes">${cube('x', { size: 34, state: 'empty' })}${cube('x', { size: 34, state: 'empty' })}${cube('x', { size: 34, state: 'empty' })}</div>
       <div><h3>${S.stack.length ? 'Select a slot to tune it' : 'Your rack is empty'}</h3>
-      <p class="muted">${S.stack.length ? 'Every block\'s parameters, error code, compute cost and enforcer show here.' : 'Load a preset above or add blocks from the palette. Each block you add opens here, ready to tune.'}</p></div>
+      <p class="muted">${S.stack.length ? 'Every block\'s parameters, error code, compute cost and enforcer show here.' : 'Pick a rulebook above or add blocks from the palette. Each block you add opens here, ready to tune.'}</p></div>
     </div>`;
   }
   const b = byId[s.id], f = familyOf(b.family);

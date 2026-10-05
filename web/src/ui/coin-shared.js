@@ -1,8 +1,9 @@
-// Pieces shared by the coins explorer, the coin page and the stacks leaderboard:
-// mini stacks of cubes, number formats, a viewport-clamped tooltip, the family filter emblem.
+// Pieces shared by the coins explorer, the coin page, the remixes page and the rules catalog:
+// pixel rule tiles, number formats, a viewport-clamped tooltip, the family filter emblem.
 import './coin-shared.css';
-import { cube, EMBLEM } from './icons.js';
-import { byId, ENFORCERS, hex } from '../data/blocks.js';
+import { EMBLEM } from './icons.js';
+import { pixelIcon } from './pixel.js';
+import { byId, ENFORCERS, hex, errName } from '../data/blocks.js';
 import { esc } from '../core/format.js';
 import { SOL_USD } from '../data/coins.js';
 
@@ -50,19 +51,52 @@ export function randomSig(len = 88) {
   return [...buf].map((b) => B58[b % 58]).join('');
 }
 
-/** One block's display line for tooltips. */
+/** One plain sentence per rule, where the catalog's tagline leans on a technical word. */
+const PLAIN = {
+  'anti-bundle': 'Only a couple of buys can land at the same moment, so bundles fail.',
+  'blocklist': 'The creator can ban wallets from holding the coin, until the list freezes.',
+  'hold-timer': 'New coins have to sit a while before they can be sold or sent.',
+  'circuit-breaker': 'Trades that move the price too far, too fast are blocked.',
+  'trading-hours': 'Trading opens and closes at set hours, like a stock market.',
+  'lock-in': 'Buys only, until the curve is part full. Then selling opens.',
+  'leftover-burn': 'Coins the curve didn\'t sell are burned when it fills.',
+  'lp-lock': 'When the curve fills, its liquidity is locked for good.',
+  'kingmaker': 'The biggest holder when the curve fills gets a share of fees for 30 days.',
+  'custom': 'Describe any rule in plain English and hookrz writes it for you.',
+};
+export const plainLine = (b) => PLAIN[b.id] ?? b.tagline;
+
+/** A rule's name in plain words (the Custom block is "your own rule"). */
+export const ruleName = (b) => (b?.id === 'custom' ? 'Your own rule' : b?.name ?? '');
+/** One rule's display line for tooltips: its name and what it does. */
 export function blockTip(slot) {
   const b = byId[slot.id];
   if (!b) return slot.id;
-  return `${b.name} · ${b.summary(slot.params)}`;
+  return `${ruleName(b)}: ${plainLine(b)}`;
+}
+/** The technical line for a rule, shown only on hover: error code, compute, who enforces it. */
+export function techTip(b) {
+  if (!b) return '';
+  const who = [b.enforcedBy, b.also].filter(Boolean).map((e) => ENFORCERS[e].name).join(' + ');
+  return [b.code != null ? `Error ${hex(b.code)} ${errName(b.code)}` : 'Never blocks a trade', b.cu ? `${b.cu.toLocaleString('en-US')} CU` : 'no compute on trades', `enforced by ${who}`].join(' · ');
 }
 
-/** A row of mini chrome cubes, one per slot, each with a tooltip. */
+/**
+ * A pixel rule tile: the family's pixel icon on a small notched square.
+ * state: '' | 'lit' (passed) | 'refused' (blocked) | 'empty' | 'off' (retired)
+ */
+export function pxTile(family, { size = 28, state = '', title = '' } = {}) {
+  const icon = Math.max(12, Math.floor((size * 0.62) / 6) * 6);
+  const accent = state === 'refused' ? '#ffb4ad' : '#8fcaff';
+  return `<span class="pxt${state ? ` ${state}` : ''}" style="--pt:${size}px${size >= 40 ? ';--st:4px' : ''}"${title ? ` data-tip="${esc(title)}"` : ''}>${state === 'empty' ? '' : pixelIcon(family, { size: icon, accent })}</span>`;
+}
+
+/** A row of pixel rule tiles, one per rule, each with a tooltip. */
 export function miniStack(stack, { size = 22, gap, states } = {}) {
   return `<span class="mstack" style="--ms:${size}px${gap != null ? `;--mg:${gap}px` : ''}">${stack.map((s, i) => {
     const b = byId[s.id];
     if (!b) return '';
-    return `<span class="mcube" data-tip="${esc(blockTip(s))}">${cube(b.family, { size, state: states?.[i] ?? '' })}</span>`;
+    return `<span class="mcube" data-tip="${esc(blockTip(s))}">${pxTile(b.family, { size, state: states?.[i] ?? '' })}</span>`;
   }).join('')}</span>`;
 }
 

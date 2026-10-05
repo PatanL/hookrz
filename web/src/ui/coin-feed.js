@@ -1,10 +1,9 @@
-// Live transfers feed (api.stream). Each row: kind, amount, wallet, time and the engine's verdict per
-// hook block (lit = passed, coral = refused, dark = not reached). Refused rows carry the error code.
+// Live trades feed (api.stream). Each row: kind, amount, wallet, time and each rule's answer
+// (lit = let it through, coral = blocked it, dark = not reached). Blocked rows say which rule; the error code is on hover.
 import { api } from '../api/client.js';
-import { byId, hex } from '../data/blocks.js';
-import { cube } from './icons.js';
+import { byId, hex, errName } from '../data/blocks.js';
 import { esc } from '../core/format.js';
-import { tok, sol, shortKey } from './coin-shared.js';
+import { tok, sol, shortKey, pxTile, ruleName } from './coin-shared.js';
 
 const MAX = 14;
 
@@ -40,22 +39,22 @@ export function mountFeed(el, coin) {
 
   el.innerHTML = `
     <div class="ph">
-      <h3><span class="live-dot"></span>Live transfers <span class="pk" id="fdCount"></span></h3>
+      <h3><span class="live-dot"></span>Live trades <span class="pk" id="fdCount"></span></h3>
       <div class="seg" id="fdSeg">${grad
     ? '<button data-src="live" class="on">DAMM v2</button><button data-src="curve">Curve record</button>'
-    : '<button data-f="all" class="on">All</button><button data-f="refused">Refused</button><button data-f="landed">Landed</button>'}</div>
+    : '<button data-f="all" class="on">All</button><button data-f="refused">Blocked</button><button data-f="landed">Passed</button>'}</div>
     </div>
-    <div class="fd-head"><span>Kind</span><span>Amount</span><span>Wallet</span><span>Verdicts</span><span>Result</span><span>Age</span></div>
+    <div class="fd-head"><span>Kind</span><span>Amount</span><span>Wallet</span><span>Rules</span><span>Result</span><span>Age</span></div>
     <ol class="fd-list" id="fdList"></ol>
     <div class="fd-foot dim" id="fdFoot"></div>`;
   const list = el.querySelector('#fdList');
 
   function verdicts(e) {
-    if (grad && st.src === 'live') return '<span class="fd-nohook" data-tip="The hook retired at graduation">—</span>';
-    if (!hooks.length) return '<span class="fd-nohook">no hook blocks</span>';
+    if (grad && st.src === 'live') return '<span class="fd-nohook" data-tip="The trade rules switched off at graduation">—</span>';
+    if (!hooks.length) return '<span class="fd-nohook">no trade rules</span>';
     return `<span class="mstack" style="--mg:3px">${hooks.map((b) => {
       const v = e.verdicts?.find((x) => x.id === b.id);
-      return `<span class="mcube" data-tip="${esc(b.name)}: ${!v ? 'not reached' : v.ok ? 'passed' : 'refused'}">${v ? cube(b.family, { size: 16, state: v.ok ? 'lit' : 'refused' }) : cube(b.family, { size: 16 })}</span>`;
+      return `<span class="mcube" data-tip="${esc(ruleName(b))}: ${!v ? 'not reached' : v.ok ? 'let it through' : 'blocked it'}">${v ? pxTile(b.family, { size: 16, state: v.ok ? 'lit' : 'refused' }) : pxTile(b.family, { size: 16 })}</span>`;
     }).join('')}</span>`;
   }
 
@@ -67,20 +66,20 @@ export function mountFeed(el, coin) {
       <span class="fd-a num">${amt}</span>
       <span class="fd-w num">${shortKey(e.wallet)}</span>
       <span class="fd-v">${verdicts(e)}</span>
-      <span class="fd-r">${e.ok ? '<span class="fd-landed">Landed</span>' : `<span class="fd-code num">${hex(b?.code)}</span>`}</span>
+      <span class="fd-r">${e.ok ? '<span class="fd-landed">Passed</span>' : `<span class="fd-code" data-tip="${esc(`Error ${hex(b?.code)} ${errName(b?.code)}`)}">Blocked</span>`}</span>
       <span class="fd-t num" data-at="${e.at}">${e.at ? age(e.at) : 'curve'}</span>
-      ${e.ok ? '' : `<span class="fd-msg"><b>${esc(b?.name ?? '')}</b> ${esc(e.msg ?? '')}</span>`}
+      ${e.ok ? '' : `<span class="fd-msg"><b>${esc(b ? ruleName(b) : '')}</b> ${esc(e.msg ?? '')}</span>`}
     </li>`;
   }
 
   function render() {
     const rows = st.rows.filter((e) => st.filter === 'all' || (st.filter === 'refused' ? !e.ok : e.ok)).slice(0, MAX);
-    list.innerHTML = rows.length ? rows.map(row).join('') : `<li class="fd-empty">${st.filter === 'refused' ? 'No refusals in the latest transfers.' : 'Waiting for the next transfer…'}</li>`;
+    list.innerHTML = rows.length ? rows.map(row).join('') : `<li class="fd-empty">${st.filter === 'refused' ? 'Nothing blocked in the latest trades.' : 'Waiting for the next trade…'}</li>`;
     st.rows.forEach((e) => { e.fresh = false; });
-    el.querySelector('#fdCount').textContent = grad && st.src === 'curve' ? 'final transfers on the curve' : `${landed + refused} seen · ${refused} refused`;
+    el.querySelector('#fdCount').textContent = grad && st.src === 'curve' ? 'final trades on the curve' : `${landed + refused} seen · ${refused} blocked`;
     el.querySelector('#fdFoot').innerHTML = grad
-      ? (st.src === 'live' ? 'The hook retired at graduation, so DAMM v2 trades run no hook blocks.' : 'The last transfers the engine checked before the curve graduated.')
-      : `Verdicts run in slot order; the first refusal fails the transaction with that block's error code.`;
+      ? (st.src === 'live' ? 'The trade rules switched off at graduation, so pool trades run no rules.' : 'The last trades the rules checked before the curve filled.')
+      : `Rules run in order. The first one that says no blocks the whole trade.`;
   }
 
   el.querySelector('#fdSeg').addEventListener('click', async (e) => {

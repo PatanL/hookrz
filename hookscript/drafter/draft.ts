@@ -2,6 +2,9 @@
 // honeypot-checked before it is returned; failures go back to the provider with the compiler / checker output.
 //
 // Providers:
+//   local      - an open-source model on our own box behind any OpenAI-compatible server (vLLM, llama.cpp, Ollama)
+//                when HOOKSCRIPT_LLM_URL is set (e.g. http://127.0.0.1:8840/v1). Model: HOOKSCRIPT_LLM_MODEL (default:
+//                whatever the server lists first). Same system prompt; vLLM prefix caching keeps it cheap.
 //   anthropic  - Claude via the official SDK (optional dependency @anthropic-ai/sdk) when ANTHROPIC_API_KEY is set.
 //                Model: HOOKSCRIPT_MODEL (default claude-opus-5-5; claude-sonnet-5-5 also fine). The system prompt is
 //                SPEC.md + every example, prompt-cached.
@@ -16,13 +19,17 @@ import { heuristicMatch, honeypotIntent, type Suggestion } from './heuristic.ts'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 export interface DraftOptions {
-  provider?: 'auto' | 'anthropic' | 'heuristic';
+  provider?: 'auto' | 'local' | 'anthropic' | 'heuristic';
+  /** OpenAI-compatible base URL for the local provider (default HOOKSCRIPT_LLM_URL) */
+  llmUrl?: string;
   model?: string;
   maxAttempts?: number;
   trades?: number;
   seed?: number;
   /** test hook: replaces the Anthropic client */
   client?: unknown;
+  /** test hook: replaces fetch for the local provider */
+  fetch?: typeof fetch;
 }
 
 export interface DraftResult {
@@ -40,7 +47,7 @@ export interface DraftResult {
   errors: Diag[];
   abi: Abi | null;
   reviewed: false;
-  provider: 'anthropic' | 'heuristic';
+  provider: ProviderName;
   model: string | null;
   template: string | null;
   /** the rule's own title (what the script does); the user's sentence stays in `prompt` */
@@ -98,7 +105,8 @@ function extractScript(text: string): string {
 }
 
 // ───── providers ─────
-interface Provider { name: 'anthropic' | 'heuristic'; model: string | null; template: string | null; first(prompt: string): Promise<string>; retry(feedback: string): Promise<string> }
+export type ProviderName = 'local' | 'anthropic' | 'heuristic';
+interface Provider { name: ProviderName; model: string | null; template: string | null; first(prompt: string): Promise<string>; retry(feedback: string): Promise<string> }
 
 async function anthropicProvider(opts: DraftOptions): Promise<Provider | null> {
   let client = opts.client as { beta: { messages: { create: (p: unknown) => Promise<unknown> } } } | undefined;
@@ -132,6 +140,46 @@ async function anthropicProvider(opts: DraftOptions): Promise<Provider | null> {
   };
   return {
     name: 'anthropic', model, template: null,
+    first: async (prompt) => { messages.push({ role: 'user', content: `Write the Hookscript for this rule:\n\n${prompt}` }); return ask(); },
+    retry: async (feedback) => { messages.push({ role: 'user', content: `${feedback}\n\nFix it and reply with the whole corrected script only.` }); return ask(); },
+  };
+}
+
+/** An open-source model behind an OpenAI-compatible /chat/completions endpoint (vLLM on the Spark). */
+async function localProvider(opts: DraftOptions): Promise<Provider | null> {
+  const base = (opts.llmUrl ?? process.env.HOOKSCRIPT_LLM_URL ?? '').replace(/\/$/, '');
+  if (!base) return null;
+  const f = opts.fetch ?? fetch;
+  const timeout = Number(process.env.HOOKSCRIPT_LLM_TIMEOUT_MS ?? 90_000);
+  let model = opts.model ?? process.env.HOOKSCRIPT_LLM_MODEL ?? '';
+  if (!model) {
+    try {
+      const r = await f(`${base}/models`, { signal: AbortSignal.timeout(3000) });
+      model = ((await r.json()) as { data?: { id: string }[] }).data?.[0]?.id ?? '';
+    } catch { return null; }
+    if (!model) return null;
+  }
+  const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [{ role: 'system', content: systemPrompt() }];
+  const ask = async (): Promise<string> => {
+    const r = await f(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      signal: AbortSignal.timeout(timeout),
+      body: JSON.stringify({
+        model, messages, temperature: 0.2, max_tokens: Number(process.env.HOOKSCRIPT_LLM_MAX_TOKENS ?? 1200),
+        // Qwen-style thinking models: answer directly (the compile/fuzz loop is our reasoning)
+        chat_template_kwargs: { enable_thinking: false },
+      }),
+    });
+    if (!r.ok) throw new Error(`local model HTTP ${r.status}`);
+    const res = (await r.json()) as { choices?: { message?: { content?: string }; finish_reason?: string }[] };
+    const text = (res.choices?.[0]?.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '');
+    if (!text.trim()) throw new Error(`Empty reply (finish_reason ${res.choices?.[0]?.finish_reason ?? '?'})`);
+    messages.push({ role: 'assistant', content: text });
+    return extractScript(text);
+  };
+  return {
+    name: 'local', model, template: null,
     first: async (prompt) => { messages.push({ role: 'user', content: `Write the Hookscript for this rule:\n\n${prompt}` }); return ask(); },
     retry: async (feedback) => { messages.push({ role: 'user', content: `${feedback}\n\nFix it and reply with the whole corrected script only.` }); return ask(); },
   };
@@ -197,7 +245,7 @@ export async function draft(prompt: string, opts: DraftOptions = {}): Promise<Dr
     return {
       ok: false, prompt, script: '', bytecodeHex: null, bytes: 0, ops: 0, cu: 0, fuzz: null, honeypot: null, warnings,
       errors: [{ message: fields.message, line: 1, col: 1, hint }], abi: null, reviewed: false,
-      provider: want === 'anthropic' || (want === 'auto' && process.env.ANTHROPIC_API_KEY) ? 'anthropic' : 'heuristic',
+      provider: 'heuristic',
       model: null, template: null, title: null, attempts: [], ...rest,
     };
   };
@@ -209,7 +257,12 @@ export async function draft(prompt: string, opts: DraftOptions = {}): Promise<Dr
       hint: `Try instead: "${intent.alternative.prompt}" (${intent.alternative.title}).`,
     });
   }
-  if (want !== 'heuristic') {
+  // auto: the local open-source model first, then Claude, then the offline templates
+  if (want === 'local' || want === 'auto') {
+    provider = await localProvider(opts);
+    if (!provider && want === 'local') warnings.push('Local model unavailable (HOOKSCRIPT_LLM_URL unset or not answering); used the offline drafter.');
+  }
+  if (!provider && (want === 'anthropic' || want === 'auto')) {
     provider = await anthropicProvider(opts);
     if (!provider && want === 'anthropic') warnings.push('Anthropic provider unavailable (no ANTHROPIC_API_KEY or @anthropic-ai/sdk not installed); used the offline drafter.');
   }
@@ -231,9 +284,9 @@ export async function draft(prompt: string, opts: DraftOptions = {}): Promise<Dr
         });
       }
       attempts.push({ n, ok: false, problem: `provider: ${(e as Error).message}` });
-      if (provider.name === 'anthropic' && n === 1) {
-        // API down / declined: fall back to the offline drafter once
-        warnings.push(`Claude was unavailable (${(e as Error).message}); used the offline drafter.`);
+      if (provider.name !== 'heuristic' && n === 1) {
+        // model down / declined: fall back to the offline drafter once
+        warnings.push(`The ${provider.name === 'local' ? 'local model' : 'Claude'} drafter was unavailable (${(e as Error).message}); used the offline drafter.`);
         provider = heuristicProvider();
         n = 0;
         continue;

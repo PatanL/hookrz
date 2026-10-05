@@ -582,6 +582,7 @@ const ESCAPE = [
   /\b(for|in|during|within) (the )?(first |next )?\d+/, /\bfirst (\d+|hour|day|minute|week|month|few)\b/, /\buntil\b/, /\bbefore\b/, /\bafter \d/, /\bunless\b/, /\bexcept\b/,
   /\b(over|above|more than|bigger than|larger than|at most|less than|under)\b/, /\d+\s*%/, /\b(quarter|half)\b/,
   /\bweekends?\b/, /\bnights?\b/, /\bsun\b/, /\bmoon\b/, /\b(odd|even) seconds?\b/, /\bbetween\b/, /\bcool ?downs?\b/, /\bper (hour|day|minute|wallet)\b/,
+  /\b(mon|tues|wednes|thurs|fri|satur|sun)days?\b/, /\b(daily|each day|every day|every (hour|week)|hourly|weekly)\b/, /\b\d{1,2}(:\d\d)?\s*(am|pm|utc)\b/, /\b\d{1,2}:\d\d\b/, /\bfrom \d/,
   /\bonce\b/, /\bwhile\b/, /\bking\b/, /\bcrown(ed)?\b/, /\bpotato\b/, /\btag(ged)?\b/, /\byou'?re it\b/, /\bline\b/, /\bqueue\b/,
 ];
 

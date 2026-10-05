@@ -15,3 +15,4 @@ server/.runtime/
 # program keypairs: if public, anyone can deploy to our program address first
 **/program-keypair.json
 **/target/
+web/dist-live/

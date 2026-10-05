@@ -10,7 +10,7 @@ export const SERVICES = [
   { id: 'router', name: 'hookrz router', kind: 'Solana program', blurb: 'Wraps Meteora DBC swaps: opens the receiver\'s Wallet record when the stack needs one, then swaps with the hook\'s extra accounts resolved.' },
   { id: 'api', name: 'API', kind: 'Service', blurb: 'Builds unsigned launch and trade transactions, gives rule-aware quotes, validates and simulates stacks. Holds no keys.' },
   { id: 'indexer', name: 'Indexer', kind: 'Service', blurb: 'Follows the engine, DBC and DAMM v2 programs; writes coins, trades, verdicts and remix lineage to Postgres; pushes the live stream.' },
-  { id: 'keeper', name: 'Keeper', kind: 'Service', blurb: 'Permissionless crank for Crank blocks: claims fee vaults, buys back and burns, posts reward roots, pays stack royalties. Anyone can run it.' },
+  { id: 'keeper', name: 'Keeper', kind: 'Service', blurb: 'Permissionless crank for Crank blocks: claims fee vaults, buys back and burns, posts reward roots, pays rule-game winners. Anyone can run it.' },
   { id: 'hookscript', name: 'Hookscript compiler', kind: 'Service', blurb: 'Turns an English rule into Hookscript with an LLM, compiles it to engine ops, measures CU and fuzzes it against 10,000 generated trades.' },
 ];
 
@@ -24,13 +24,13 @@ export const ENDPOINTS = [
   { method: 'POST', path: '/v1/trade/prepare', fn: 'prepareTrade', group: 'Trade', desc: 'Unsigned router swap with hook accounts resolved and the Wallet record opened if needed.' },
   { method: 'POST', path: '/v1/stacks/validate', fn: 'validate', group: 'Stacks', desc: 'CU, extra accounts, rent, route compatibility and warnings for a proposed stack.' },
   { method: 'POST', path: '/v1/stacks/simulate', fn: 'simulate', group: 'Stacks', desc: 'Simulates a launch: runs the stack against a seeded crowd of snipers, bundlers, whales and holders and compares it with no rules.' },
-  { method: 'GET', path: '/v1/stacks', fn: 'stacks', group: 'Stacks', desc: 'Stacks ranked by remixes and royalties earned, with their authors.' },
+  { method: 'GET', path: '/v1/stacks', fn: 'stacks', group: 'Stacks', desc: 'Rulebooks ranked by how many coins reuse them.' },
   { method: 'GET', path: '/v1/stacks/:id/lineage', fn: 'lineage', group: 'Stacks', desc: 'The remix tree: parent, children and what changed in each remix.' },
   { method: 'POST', path: '/v1/hookscript/draft', fn: 'draftHookscript', group: 'Stacks', desc: 'English → Hookscript draft, compiled ops, CU estimate and fuzz results.' },
   { method: 'POST', path: '/v1/launch/prepare', fn: 'prepareLaunch', group: 'Launch', desc: 'Unsigned launch transaction: mint + DBC pool + engine Stack + ExtraAccountMetaList (+ creator buy).' },
   { method: 'POST', path: '/v1/launch/submit', fn: 'submitLaunch', group: 'Launch', desc: 'Relays the signed launch, waits for confirmation, indexes the coin.' },
-  { method: 'GET', path: '/v1/creators/:wallet', fn: 'creator', group: 'Own', desc: 'A creator\'s coins, stacks, remixes of their stacks and claimable fees + royalties.' },
-  { method: 'POST', path: '/v1/fees/claim/prepare', fn: 'prepareClaim', group: 'Own', desc: 'Unsigned claim of creator fees (DBC) and stack royalties (keeper vault).' },
+  { method: 'GET', path: '/v1/creators/:wallet', fn: 'creator', group: 'Own', desc: 'A creator\'s coins, their rulebooks, and claimable creator fees.' },
+  { method: 'POST', path: '/v1/fees/claim/prepare', fn: 'prepareClaim', group: 'Own', desc: 'Unsigned claim of creator fees from the curve pool.' },
   { method: 'WS', path: '/v1/stream?mint=', fn: 'stream', group: 'Live', desc: 'Push stream of transfers and verdicts, curve ticks and keeper actions.' },
 ];
 
@@ -48,9 +48,8 @@ export const FEES = {
   draft: true,
   tradeFeePct: 1.0,
   split: [
-    { who: 'Creator', pct: 50, note: 'Claimed straight from the DBC pool. Crank blocks (burns, rewards, tithes) spend from this share.' },
-    { who: 'hookrz', pct: 40, note: 'Platform share: engine audits, keeper gas, the API.' },
-    { who: 'Stack author', pct: 10, note: 'Remix royalty. Paid to the author of the stack this coin remixed, one level up only. Originals keep it.' },
+    { who: 'Creator', pct: 50, note: 'Claimed straight from the curve pool. Fee-funded rules (burns, rewards, tithes) spend from this share.' },
+    { who: 'hookrz', pct: 50, note: 'Platform share: engine audits, the public keeper, the API.' },
   ],
   launchCostSol: 0.02,
 };

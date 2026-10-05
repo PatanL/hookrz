@@ -1,317 +1,267 @@
-// hookrz.fun — home. Hero with the live rack, the engine, block families, how a transfer gets hooked,
-// remix lineage, the fee split and trending coins. All data comes through src/api/client.js.
+// hookrz.fun — home. Benefit first: say your rule in plain English (drafted and checked live), rule ideas you can
+// launch as they are, the five rulebooks, coins, and the brand line. The engine, the transfer path and the fee details
+// live in Docs. All data comes through src/api/client.js.
 import '../styles/base.css';
 import '../styles/home.css';
 import { mountChrome } from '../ui/chrome.js';
 import { voxelSVG } from '../ui/voxel.js';
-import { cube, ICON } from '../ui/icons.js';
+import { pixelIcon, hookMark } from '../ui/pixel.js';
+import { ICON } from '../ui/icons.js';
 import { avatar } from '../ui/avatar.js';
 import { usd, pctS, esc } from '../core/format.js';
-import { FAMILIES, ENFORCERS, ENGINE, BLOCKS, PRESETS, byId } from '../data/blocks.js';
+import { PRESETS, byId } from '../data/blocks.js';
 import { api } from '../api/client.js';
-import { FEES } from '../api/contract.js';
-import { mountRack } from '../ui/home-rack.js';
-import { mountFlow } from '../ui/home-flow.js';
-import { mountLineage, remixTree } from '../ui/home-lineage.js';
-import { mountRoyalty } from '../ui/home-royalty.js';
-
-let io; // reveal-on-scroll observer (declared before the first reveal() call)
+import { EXAMPLES } from '../hookscript/examples.js';
+import { IDEAS, glyph } from '../ui/home-ideas.js';
+import { mountRuleCard, cardHTML } from '../ui/home-rule.js';
 
 mountChrome('');
 
 const ARROW = ICON.arrow;
-const fmt = (n) => Math.round(n).toLocaleString('en-US');
-const share = (who) => FEES.split.find((s) => s.who === who)?.pct ?? 0;
-const FAIR = PRESETS.find((p) => p.id === 'fair-launch') ?? PRESETS[0];
-// the strip under the hero: fixed facts of the engine and the fee, nothing counted
-const FACTS = [
-  ['Blocks', `${BLOCKS.length}`, `in ${FAMILIES.length} families, each one rule`],
-  ['Slots per stack', `${ENGINE.maxSlots}`, 'run in order on every transfer'],
-  ['To launch', `${FEES.launchCostSol}<small>SOL</small>`, 'mint, curve and stack in one tx'],
-  ['Remix royalty', `${share('Stack author')}<small>%</small>`, 'of the fee on every remix of your stack'],
+const icon = (name, size = 24, o = {}) => pixelIcon(name, { size, color: '#dfe7f2', ...o });
+
+// hero example chips, from the rules the drafter knows by heart (src/hookscript/examples.js)
+const ex = (label) => EXAMPLES.find((e) => e.label === label)?.text ?? '';
+const CHIPS = [
+  ['No sell over 25% in 2h', ex('Quarter bag')],
+  ['King of the Hill', ex('King of the Hill')],
+  ['Invite only', ex('Invite only')],
+  ['Louder opening', ex('Louder')],
+].filter(([, t]) => t);
+
+// rulebooks in plain words (the preset blurbs, with two made plainer)
+const OUTCOME = {
+  club: 'Only holders of a coin you pick can buy in.',
+  market: 'Trades like a stock: market hours and a crash breaker.',
+};
+const famsOf = (p) => [...new Set(p.slots.flat().map((id) => byId[id]?.family).filter(Boolean))];
+
+const STEPS = [
+  [glyph('custom', { size: 28 }), 'Pick your rules', 'Choose a rulebook, or describe your own rule in plain English.'],
+  [glyph('coin', { size: 28 }), 'Name your coin', 'Name, ticker and image. Add a first buy if you like.'],
+  [glyph('check', { size: 28 }), 'Launch in one transaction', 'Coin, curve and rules go live together, so nobody trades before the rules are on.'],
 ];
-const ENF_ORDER = ['hook', 'curve', 'crank', 'ext'];
-const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+const SAFE = [
+  ['guard', 'The chain enforces every rule'],
+  ['lock', 'Rules can only refuse a trade, never move funds'],
+  ['check', 'hookrz never holds your keys'],
+];
+
+const BRAND = [
+  ['BUILD.', 'Pick a rulebook or write your own rule.'],
+  ['REMIX.', 'Reuse any coin’s rules in one click.'],
+  ['OWN.', 'Your coin, your rules, enforced on chain.'],
+];
 
 const app = document.getElementById('app');
 app.classList.add('home');
 app.innerHTML = `
 <section class="hero">
-  <div class="wrap">
-    <span class="eyebrow rv">Transfer-hook launchpad on Solana</span>
-    <h1 class="hero-title rv" style="--d:60ms"><span class="sr">Build. Remix. Own.</span>
-      <span class="vx-one" aria-hidden="true">${vx('BUILD. REMIX. OWN.')}</span>
-      <span class="vx-three" aria-hidden="true">${['BUILD.', 'REMIX.', 'OWN.'].map((w) => `<span>${vx(w)}</span>`).join('')}</span>
-    </h1>
-    <div class="hero-grid">
-      <div class="hero-copy">
-        <div class="hero-lead">
-        <p class="lede rv" style="--d:120ms">Build a coin from rule blocks. Solana runs your stack on every transfer, so a trade that breaks a rule never lands. Remix any coin's stack in one click, and earn every time someone remixes yours.</p>
-        <div class="hero-ctas rv" style="--d:180ms">
-          <a class="btn btn-chrome btn-lg" href="build.html">Build a coin ${ARROW}</a>
-          <a class="btn btn-glass btn-lg" href="stacks.html">Browse stacks</a>
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <h1 class="hero-h">Launch a coin snipers can’t snipe and <span class="chrome-text">whales can’t dump.</span></h1>
+      <p class="hero-sub">Pick a rulebook or say your own rule in plain English. Solana refuses every trade that breaks it, from the first block.</p>
+      <form class="ask" id="ask" action="build.html" method="get" autocomplete="off">
+        <label class="sr" for="askIn">Describe your coin’s rule</label>
+        <div class="ask-box">
+          <span class="ask-ic" aria-hidden="true">${icon('custom', 22)}</span>
+          <textarea id="askIn" name="rule" rows="1" maxlength="280" placeholder="Describe your coin’s rule…" spellcheck="false"></textarea>
+          <button class="btn btn-chrome btn-lg ask-go" type="submit">Build it ${ARROW}</button>
         </div>
+        <div class="ask-chips" role="group" aria-label="Example rules">
+          <span class="pixel ask-try">Try</span>
+          ${CHIPS.map(([l, t], i) => `<button type="button" class="ask-chip${i ? '' : ' on'}" data-ex="${esc(t)}">${esc(l)}</button>`).join('')}
         </div>
-        <ul class="hero-facts rv" style="--d:240ms">
-          <li><i class="hf"></i><span><b>Refused on chain.</b> Hook blocks run inside Token-2022 on every transfer, on every route.</span></li>
-          <li><i class="hf"></i><span><b>Armed before the first trade.</b> Mint, curve and stack launch in one transaction.</span></li>
-          <li><i class="hf"></i><span><b>No keys.</b> The engine can only refuse a transfer. It never moves funds.</span></li>
-        </ul>
-      </div>
-      <div class="hero-rack-wrap rv" style="--d:140ms">
-        <div class="rack px" id="rack"><div class="rack-skel"></div></div>
-        <div class="rack-floor" aria-hidden="true"></div>
-      </div>
+      </form>
+      <a class="ask-alt" href="build.html#presets">or pick a ready-made rulebook ${ARROW}</a>
     </div>
-    <div class="stats-strip px rv" id="stats" style="--d:200ms">
-      ${FACTS.map(([l, v, sub]) => `
-      <div class="stat"><span class="stat-k pixel">${l}</span><b class="num">${v}</b><span class="stat-sub">${sub}</span></div>`).join('')}
+    <div class="hero-art">
+      <div class="hang" aria-hidden="true"><i class="hang-line"></i>${hookMark(150)}</div>
+      <div class="rcard px" id="rcard" aria-live="polite">${cardHTML()}</div>
     </div>
   </div>
-</section>
-
-<section class="section engine" id="engine">
-  <div class="wrap engine-grid">
-    <figure class="engine-art">
-      <img class="rv" src="img/brand/engine-rack.webp" srcset="img/brand/engine-rack-900.webp 900w, img/brand/engine-rack.webp 1672w" sizes="(max-width: 1020px) 100vw, 760px" alt="The hookrz engine: six block slots on one cable" width="1672" height="941" decoding="async">
-      <figcaption class="engine-vs rv">
-        <div class="vs-row old">
-          <span class="vs-k pixel">One program, one rule</span>
-          <span class="vs-cubes">${cube('guard', { size: 24 })}${cube('x', { size: 24, state: 'empty' }).repeat(ENGINE.maxSlots - 1)}</span>
-          <span class="vs-t">A mint names one hook program, so a coin usually gets one rule.</span>
-        </div>
-        <div class="vs-row">
-          <span class="vs-k pixel">hookrz_engine</span>
-          <span class="vs-cubes">${FAMILIES.map((f) => cube(f.id, { size: 24, state: 'lit' })).join('')}</span>
-          <span class="vs-t">Every coin names the same engine. It runs a stack of up to ${ENGINE.maxSlots} blocks.</span>
-        </div>
-      </figcaption>
-    </figure>
-    <div class="engine-copy">
-      <div class="section-head rv">
-        <span class="eyebrow">The engine</span>
-        <h2>One engine.<br><span class="chrome-text">A whole stack.</span></h2>
-        <p class="lede">A Token-2022 mint can point at exactly one transfer-hook program. So a coin usually gets one rule, or a program written just for it. hookrz points every coin at one audited engine, <span class="mono">hookrz_engine</span>, that reads the coin's stack and runs up to ${ENGINE.maxSlots} blocks in slot order on every transfer.</p>
-      </div>
-      <div class="engine-stats rv">
-        <div class="nr"><b class="num">${ENGINE.maxSlots}</b><span class="pixel">Slots per stack</span></div>
-        <div class="nr"><b class="num">${ENGINE.cuBudget.toLocaleString('en-US')}</b><span class="pixel">CU per transfer</span></div>
-        <div class="nr"><b class="num">0</b><span class="pixel">Keys held</span></div>
-      </div>
-      <ul class="enforcers rv">
-        ${ENF_ORDER.map((k) => `<li><span class="enf ${k}"><i></i>${ENFORCERS[k].name}</span><span>${ENFORCERS[k].long}</span><span class="mono dim">${plural(BLOCKS.filter((b) => b.enforcedBy === k).length, 'block')}</span></li>`).join('')}
-      </ul>
-    </div>
-  </div>
-</section>
-
-<section class="section families" id="families">
   <div class="wrap">
-    <div class="section-head rv">
-      <span class="eyebrow">The blocks</span>
-      <h2>Six families. <span class="chrome-text">${BLOCKS.length} blocks.</span></h2>
-      <p class="lede">Each block is one rule with bounded settings you tune. Snap up to ${ENGINE.maxSlots} into a stack. The engine checks the blocks that refuse; the curve and the public keeper run the rest.</p>
-    </div>
-    <div class="fam-grid">${FAMILIES.map(famCard).join('')}</div>
+    <ul class="safe" aria-label="Why it’s safe">
+      ${SAFE.map(([i, t]) => `<li>${icon(i, 16)}<span>${t}</span></li>`).join('')}
+    </ul>
   </div>
 </section>
 
-<section class="section how" id="how">
+<section class="section steps-sec">
   <div class="wrap">
-    <div class="how-head">
-      <div class="section-head rv">
-        <span class="eyebrow">Under the hood</span>
-        <h2>How a transfer <span class="chrome-text">gets hooked.</span></h2>
-        <p class="lede">Every transfer of a hookrz coin goes through Token-2022, which calls the engine before a single token moves. Pick a trade and watch a six-block stack decide it.</p>
+    <ol class="steps">
+      ${STEPS.map(([ic, h, p], i) => `<li class="step tile sf">
+        <span class="step-n" aria-hidden="true">${voxelSVG(String(i + 1), { cell: 6, gap: 0.8, glow: false, title: '' })}</span>
+        <span class="step-ic">${ic}</span>
+        <div><h3>${h}</h3><p>${p}</p></div>
+      </li>`).join('')}
+    </ol>
+  </div>
+</section>
+
+<section class="section ideas" id="ideas">
+  <div class="wrap">
+    <div class="ideas-head">
+      <div class="section-head sf">
+        <span class="eyebrow">Rule ideas</span>
+        <h2>Coins that play by <span class="chrome-text">their own rules.</span></h2>
+        <p class="lede">Each idea is a real rule, tested so every holder can still sell. Launch it as it is, or tweak it first.</p>
       </div>
-      <img class="how-art rv" src="img/brand/hero-hook-stack.webp" srcset="img/brand/hero-hook-stack-900.webp 900w, img/brand/hero-hook-stack.webp 1672w" sizes="(max-width: 1020px) 100vw, 820px" alt="" width="1672" height="941" loading="lazy" decoding="async">
+      <a class="ask-alt own-link sf" href="#ask" id="ownLink">${glyph('custom', { size: 16 })}Or write your own rule</a>
     </div>
-    <div class="flow px rv" id="flow"></div>
+    <div class="idea-grid">
+      ${IDEAS.map((d) => `<a class="idea tile sf" href="build.html?idea=${encodeURIComponent(d.id)}">
+        <span class="idea-ic">${glyph(d.icon, { size: 36 })}</span>
+        <h3>${esc(d.name)}</h3>
+        <p>${esc(d.line)}</p>
+        <span class="idea-go pixel">Launch with this ${ARROW}</span>
+      </a>`).join('')}
+    </div>
+    <button type="button" class="btn btn-glass idea-more" id="ideaMore">See ${IDEAS.length - 6} more rule ideas</button>
   </div>
 </section>
 
-<section class="section remix" id="remix">
+<section class="section books" id="rulebooks">
   <div class="wrap">
-    <div class="remix-top">
-      <div class="section-head rv">
-        <span class="eyebrow">Remix</span>
-        <h2>Fork any stack <span class="chrome-text">in one click.</span></h2>
-        <p class="lede">Every stack is public. Open a coin or a preset, hit Remix, tune a block or add one, and launch. The new coin keeps a parent link, so its lineage is on chain and the royalty knows where to go.</p>
-        <div class="remix-ctas"><a class="btn btn-chrome btn-lg" href="build.html?preset=${FAIR.id}">Remix ${esc(FAIR.name)} ${ARROW}</a><a class="btn btn-glass btn-lg" href="stacks.html">Browse stacks</a></div>
-      </div>
-      <img class="remix-art rv" src="img/brand/remix-tree.webp" srcset="img/brand/remix-tree-900.webp 900w, img/brand/remix-tree.webp 1672w" sizes="(max-width: 1020px) 100vw, 640px" alt="One stack of blocks branching into three remixes" width="1672" height="941" loading="lazy" decoding="async">
+    <div class="section-head sf">
+      <span class="eyebrow">Rulebooks</span>
+      <h2>Or start from a rulebook.</h2>
     </div>
-    <div class="lineage px rv" id="lineage">
-      <div class="lin-head"><span class="pixel">How a remix works</span><span class="lin-title"><b>${esc(FAIR.name)}</b> <span class="dim">preset, remixed three ways. Each remix changes one thing.</span></span></div>
-      <div class="lin-body"></div>
-      <p class="lin-note"><span class="lin-key"><i class="k-add"></i>Block added</span><span class="lin-key"><i class="k-tune"></i>Setting tuned</span><span>A remix you launch keeps a parent link on chain. Remix a coin and ${share('Stack author')}% of your coin's fee goes to the author of the stack you forked.</span></p>
-    </div>
-  </div>
-</section>
-
-<section class="section own" id="own">
-  <div class="wrap">
-    <div class="own-head">
-      <div class="section-head rv">
-        <span class="eyebrow">Own</span>
-        <h2>Get paid when <span class="chrome-text">your stack travels.</span></h2>
-        <p class="lede">Every trade on the curve pays a ${FEES.tradeFeePct}% fee. Half goes to the coin's creator. When someone remixes your stack, you earn a tenth of the fee on every trade of their coin.</p>
-      </div>
-      <div class="own-example rv" id="ownEx"></div>
-    </div>
-    <div class="fee px rv" id="fee">
-      <div class="fee-main">
-        <div class="fee-head"><span class="pixel">The ${FEES.tradeFeePct}% trade fee</span><span class="pixel dim">1 cube = 1% of the fee</span></div>
-        <div class="fee-cells" role="img" aria-label="${FEES.split.map((s) => `${s.who} ${s.pct}%`).join(', ')}">${feeCells()}</div>
-        <div class="fee-legend">${FEES.split.map((s, i) => `
-          <div class="fl fl-${i}"><span class="fl-sw"></span><b class="num">${s.pct}%</b><span class="fl-who">${s.who}</span><p>${esc(s.note)}</p></div>`).join('')}
-        </div>
-      </div>
-      <div class="fee-ex" id="feeEx"></div>
+    <div class="book-grid">
+      ${PRESETS.map((p) => `<a class="book tile sf" href="build.html?preset=${encodeURIComponent(p.id)}">
+        <span class="book-ics">${famsOf(p).map((f) => icon(f, 22)).join('')}</span>
+        <h3>${esc(p.name)}</h3>
+        <p>${esc(OUTCOME[p.id] ?? p.blurb)}</p>
+        <span class="book-go">Launch with this ${ARROW}</span>
+      </a>`).join('')}
     </div>
   </div>
 </section>
 
-<section class="section trending" id="trending">
-  <div class="wrap">
-    <div id="trend"><div class="coin-grid">${'<div class="coin-card skel"></div>'.repeat(3)}</div></div>
-  </div>
+<section class="section coins-sec" id="coins">
+  <div class="wrap"><div id="trend" class="trend-skel" aria-busy="true"></div></div>
 </section>
 
-<section class="section cta-band">
+<section class="section brand-sec">
   <div class="wrap">
-    <div class="cta px rv">
-      <img class="cta-art" src="img/banner-build-remix-own.webp" srcset="img/banner-build-remix-own-1000.webp 1000w, img/banner-build-remix-own.webp 2000w" sizes="(max-width: 1240px) 100vw, 1160px" alt="BUILD. REMIX. OWN.: chrome blocks in a rack, branching into remixes" width="2000" height="667" loading="lazy" decoding="async">
-      <div class="cta-body">
-        <div>
-          <h2>Snap the blocks.<br><span class="chrome-text">Launch in one transaction.</span></h2>
-          <p class="lede">Mint, curve, stack and your first buy land together, so nobody trades before the rules are armed. Launching costs <span class="mono">${FEES.launchCostSol} SOL</span>.</p>
-        </div>
-        <div class="cta-btns"><a class="btn btn-chrome btn-lg" href="build.html">Build a coin ${ARROW}</a><a class="btn btn-glass btn-lg" href="build.html#presets">Start from a preset</a></div>
+    <div class="brand-band px sf">
+      <div class="brand-words">
+        ${BRAND.map(([w, t]) => `<div class="bw"><span class="bw-vx">${vx(w)}</span><p>${t}</p></div>`).join('')}
       </div>
     </div>
   </div>
 </section>`;
 
-reveal();
-mountRack(document.getElementById('rack'), { preset: FAIR });
-mountFlow(document.getElementById('flow'));
-mountLineage(document.querySelector('#lineage .lin-body'), remixTree(FAIR, [
-  { title: 'Pay the holders', blurb: 'Same launch rules, and holders share the creator fees.', change: { add: 'holder-rewards' } },
-  { title: 'Tighten the launch', blurb: 'Smaller first buys while the launch window is open.', change: { tune: ['snipe-shield', { max: 0.25 }] } },
-  { title: 'Stop sandwiches', blurb: 'Same launch rules, and same-block flips are refused.', change: { add: 'sandwich-guard' } },
-]));
-mountRoyalty(document.getElementById('ownEx'), document.getElementById('feeEx'));
-loadTrending();
+// ───────── hero: the rule input and its live card ─────────
+const form = document.getElementById('ask');
+const input = document.getElementById('askIn');
+const chips = [...form.querySelectorAll('.ask-chip')];
+const fit = () => { input.style.height = 'auto'; input.style.height = `${input.scrollHeight}px`; };
+const mark = (text) => chips.forEach((c) => c.classList.toggle('on', c.dataset.ex === text));
+const card = mountRuleCard(document.getElementById('rcard'), { fill: (t) => { input.value = t; fit(); mark(t); } });
 
-/** Trending: coins launched on hookrz, test coins left out. With none yet, the board says so. */
-async function loadTrending() {
+let typing, typer;
+input.addEventListener('input', () => {
+  clearInterval(typer);
+  fit();
+  mark(input.value.trim());
+  clearTimeout(typing);
+  const t = input.value.trim();
+  typing = setTimeout(() => { if (!t || t.length >= 8) card.run(t || ''); }, 650);
+});
+input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
+input.addEventListener('focus', card.warm, { once: true });
+form.addEventListener('pointerenter', card.warm, { once: true });
+form.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const t = input.value.trim();
+  if (!t) { input.focus(); form.classList.remove('nudge'); void form.offsetWidth; form.classList.add('nudge'); return; }
+  location.href = `build.html?rule=${encodeURIComponent(t)}`;
+});
+chips.forEach((c) => c.addEventListener('click', () => {
+  clearTimeout(typing);
+  type(c.dataset.ex);
+  mark(c.dataset.ex);
+  card.run(c.dataset.ex);
+}));
+addEventListener('resize', fit);
+
+/** Fill the input like someone typing it (instant when motion is reduced). */
+function type(text) {
+  clearInterval(typer);
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { input.value = text; fit(); return; }
+  let i = 0;
+  const step = Math.max(2, Math.ceil(text.length / 28));
+  typer = setInterval(() => {
+    i = Math.min(text.length, i + step);
+    input.value = text.slice(0, i);
+    fit();
+    if (i >= text.length) clearInterval(typer);
+  }, 16);
+}
+
+document.getElementById('ownLink').onclick = (e) => {
+  e.preventDefault();
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+  setTimeout(() => input.focus({ preventScroll: true }), reduce ? 0 : 450);
+};
+document.getElementById('ideaMore').onclick = (e) => { e.currentTarget.previousElementSibling.classList.add('all'); };
+
+// ───────── coins ─────────
+loadCoins();
+
+/** Coins launched on hookrz, test coins left out. With none yet, the board says so. */
+async function loadCoins() {
   const el = document.getElementById('trend');
   const coins = (await api.coins({ sort: 'volume' }).catch(() => [])).filter((c) => !c.test);
+  el.classList.remove('trend-skel');
+  el.removeAttribute('aria-busy');
   if (!coins.length) {
-    el.innerHTML = emptyBoard();
-    reveal(el);
+    el.innerHTML = `
+    <div class="empty sf">
+      <span class="empty-art" aria-hidden="true">${hookMark(64)}</span>
+      <div class="empty-copy">
+        <span class="eyebrow">Coins</span>
+        <h2>No coins yet.</h2>
+        <p class="lede">The first coin launched on hookrz leads this board.</p>
+      </div>
+      <a class="btn btn-chrome btn-lg" href="build.html">Launch the first coin ${ARROW}</a>
+    </div>`;
     return;
   }
-  const shown = coins.slice(0, 6);
+  const shown = coins.slice(0, 3);
   el.innerHTML = `
-    <div class="trend-head rv">
-      <div class="section-head"><span class="eyebrow">Trending</span><h2>Moving now.</h2></div>
+    <div class="trend-head sf">
+      <div class="section-head"><span class="eyebrow">Coins</span><h2>Trending now.</h2></div>
       <a class="btn btn-glass" href="coins.html">All coins ${ARROW}</a>
     </div>
-    <div class="coin-grid">${shown.map(coinCard).join('')}${shown.length < 6 && shown.length % 3 ? nextCard(shown.length) : ''}</div>`;
-  reveal(el);
+    <div class="coin-grid">${shown.map(coinCard).join('')}${shown.length < 3 ? `<a class="coin coin-next sf" href="build.html">${hookMark(44)}<b>Launch the next one</b><span class="dim">With a rule idea, a rulebook or your own rule.</span><span class="book-go">Launch a coin ${ARROW}</span></a>` : ''}</div>`;
 }
 
-function emptyBoard() {
-  return `
-  <div class="board-empty px rv">
-    <div class="be-copy">
-      <span class="eyebrow">Trending</span>
-      <h2>No coins yet.</h2>
-      <p class="lede">The first coin launched on hookrz leads this board. Snap up to ${ENGINE.maxSlots} blocks into a stack, tune them and launch in one transaction.</p>
-      <div class="be-ctas"><a class="btn btn-chrome btn-lg" href="build.html">Build the first coin ${ARROW}</a><a class="btn btn-glass btn-lg" href="build.html#presets">Start from a preset</a></div>
-    </div>
-    <div class="be-shelf" aria-hidden="true">
-      ${FAMILIES.map((f, i) => `<a class="be-slot" href="blocks.html#${f.id}" tabindex="-1" style="--i:${i}"><img src="img/brand/block-${f.id}-sm.webp" alt="" width="240" height="240" loading="lazy" decoding="async"><span class="pixel">${esc(f.name)}</span></a>`).join('')}
-    </div>
-  </div>`;
-}
-
-function nextCard(i) {
-  return `<a class="coin coin-next nr rv" style="--d:${(i % 3) * 70}ms" href="build.html">
-    <span class="coin-next-cubes">${FAMILIES.slice(0, 3).map((f) => cube(f.id, { size: 26 })).join('')}</span>
-    <b>Launch the next one</b>
-    <span class="dim">Start from a preset or a blank rack.</span>
-    <span class="fam-go">Build a coin ${ARROW}</span>
-  </a>`;
-}
-
-/** Voxel display line plus a faces-only copy that a moving mask sweeps across: a chrome glint. */
-function vx(text) {
-  const svg = voxelSVG(text, { cell: 12, gap: 1.6, glow: true, title: '' });
-  const vb = /viewBox="([^"]+)"/.exec(svg)[1];
-  const faces = (svg.match(/<rect [^>]*\/>/g) ?? []).map((r) => r.replace(/fill="[^"]*"/, 'fill="#fff"').replace(/ style="[^"]*"/, '')).join('');
-  return `<span class="vx-g">${svg}<span class="vx-glint"><svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg"><g fill-opacity=".85">${faces}</g></svg></span></span>`;
-}
-
-function famCard(f, i) {
-  const list = BLOCKS.filter((b) => b.family === f.id);
-  return `<a class="fam nr rv" style="--d:${(i % 3) * 70}ms" href="blocks.html#${f.id}">
-    <div class="fam-top">
-      <img src="img/brand/block-${f.id}-sm.webp" alt="" width="240" height="240" loading="lazy" decoding="async">
-      <div class="fam-id"><span class="pixel">${esc(f.verb)}</span><h3>${esc(f.name)}</h3><span class="mono dim">${plural(list.length, 'block')}</span></div>
-    </div>
-    <p>${esc(f.blurb)}</p>
-    <ul class="fam-list">${list.map((b) => `<li><span class="enf ${b.enforcedBy}" title="${esc(ENFORCERS[b.enforcedBy].long)}"><i></i></span>${esc(b.name)}</li>`).join('')}</ul>
-    <span class="fam-go">Open ${esc(f.name)} ${ARROW}</span>
-  </a>`;
-}
-
-function feeCells() {
-  // 20 columns x 5 rows = 100 cells; columns are filled share by share
-  const cols = [];
-  FEES.split.forEach((s, i) => { for (let c = 0; c < s.pct / 5; c++) cols.push(i); });
-  return cols.map((g, c) => `<span class="fc-col g${g}" style="--c:${c}">${'<i></i>'.repeat(5)}</span>`).join('');
-}
-
-function coinCard(c, i) {
+function coinCard(c) {
   const grad = c.phase === 'graduated';
-  const ch = Math.max(-99.9, c.change24);
-  return `<a class="coin nr rv" style="--d:${(i % 3) * 70}ms" href="coin.html?t=${esc(c.ticker)}">
-    <div class="coin-top">${avatar(c, 48)}
+  const ch = Math.max(-99.9, c.change24 ?? 0);
+  const fams = [...new Set((c.stack ?? []).map((s) => byId[s.id]?.family ?? 'custom'))];
+  return `<a class="coin sf" href="coin.html?t=${esc(c.ticker)}">
+    <div class="coin-top">${avatar(c, 44)}
       <div class="coin-id"><b>${esc(c.name)}</b><span class="mono">$${esc(c.ticker)}</span></div>
       <span class="coin-chg num ${ch >= 0 ? 'up' : 'down'}">${pctS(ch)}</span></div>
     <div class="coin-nums">
       <div><span class="pixel">Market cap</span><b class="num">${usd(c.mcapUsd)}</b></div>
-      <div><span class="pixel">Vol 24h</span><b class="num">${usd(c.vol24Usd)}</b></div>
-      <div><span class="pixel">Holders</span><b class="num">${fmt(c.holders)}</b></div>
+      <div><span class="pixel">Volume 24h</span><b class="num">${usd(c.vol24Usd)}</b></div>
     </div>
-    <div class="coin-curve${grad ? ' grad' : ''}"><div class="bar"><i style="width:${Math.max(2, c.progress * 100).toFixed(1)}%"></i></div>
-      <span class="pixel">${grad ? 'Graduated · DAMM v2' : `Curve ${Math.round(c.progress * 100)}%`}</span></div>
-    <div class="coin-foot">
-      <span class="coin-stack" title="${c.stack.length} blocks">${c.stack.map((s) => cube(familyOfBlock(s.id), { size: 22 })).join('')}</span>
-      ${c.parent ? `<span class="chip ice">${ICON.remix}Remix of $${esc(c.parent)}</span>` : `<span class="chip">Original</span>`}
-    </div>
+    <div class="coin-curve"><div class="bar"><i style="width:${Math.max(2, (c.progress ?? 0) * 100).toFixed(1)}%"></i></div>
+      <span class="pixel">${grad ? 'Graduated' : `Curve ${Math.round((c.progress ?? 0) * 100)}%`}</span></div>
+    <div class="coin-foot"><span class="coin-rules">${fams.map((f) => icon(f, 18)).join('')}</span><span class="dim">${c.stack?.length ?? 0} rule${c.stack?.length === 1 ? '' : 's'}</span></div>
   </a>`;
 }
 
-function familyOfBlock(id) { return byId[id]?.family ?? 'custom'; }
-
-/** Reveal-on-scroll. Content stays visible for reduced motion, automation and crawlers. */
-function reveal(root = document) {
-  const els = [...root.querySelectorAll('.rv:not(.in)')];
-  if (root !== document && root.classList?.contains('rv')) els.push(root);
-  const skip = matchMedia('(prefers-reduced-motion: reduce)').matches || navigator.webdriver || !('IntersectionObserver' in window);
-  if (skip) {
-    els.forEach((e) => e.classList.add('in'));
-    if (navigator.webdriver) document.querySelectorAll('img[loading=lazy]').forEach((i) => { i.loading = 'eager'; });
-    return;
-  }
-  io ??= new IntersectionObserver((entries) => {
-    for (const e of entries) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
-  }, { rootMargin: '0px 0px -6% 0px', threshold: 0.06 });
-  els.forEach((e) => io.observe(e));
-  document.documentElement.classList.add('rv-on'); // hide-until-revealed only once the observer is watching
+/** Voxel display word plus a faces-only copy that a moving mask sweeps across: a chrome glint. */
+function vx(text) {
+  const svg = voxelSVG(text, { cell: 9, gap: 1.2, glow: true, title: text });
+  const vb = /viewBox="([^"]+)"/.exec(svg)[1];
+  const faces = (svg.match(/<rect [^>]*\/>/g) ?? []).map((r) => r.replace(/fill="[^"]*"/, 'fill="#fff"').replace(/ style="[^"]*"/, '')).join('');
+  return `<span class="vx-g">${svg}<span class="vx-glint" aria-hidden="true"><svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg"><g fill-opacity=".85">${faces}</g></svg></span></span>`;
 }
-

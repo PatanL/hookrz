@@ -17,6 +17,29 @@ on sell:
 `;
 
 
+/** A script's plain description: the comment lines right under its `rule "…"` line, without a leading "$TICKER." tag. */
+export function aboutOf(source) {
+  const lines = String(source ?? '').split('\n');
+  const at = lines.findIndex((l) => /^\s*rule\s+"/.test(l));
+  const out = [];
+  for (const l of lines.slice(at + 1)) { const m = l.match(/^\s*#\s?(.*)$/); if (!m) break; out.push(m[1].trim()); }
+  return out.join(' ').replace(/^\$[A-Z0-9]+\.\s*/, '').trim();
+}
+/** The rule's title from its `rule "…"` line. */
+export const titleOf = (source) => String(source ?? '').match(/^\s*rule\s+"([^"]*)"/m)?.[1] ?? '';
+
+/**
+ * A ready-made idea (hookscript/examples/<name>.hs, bundled into src/vendor/hookscript.js) as editor state: the exact
+ * script, titled by its own rule line and described by its comments. Compile, fuzz and the honeypot check still run
+ * (refresh) before it can launch. Resolves null for an unknown name.
+ */
+export async function ideaState(name) {
+  const { load } = await import('../hookscript/hs.js');
+  const src = (await load()).EXAMPLES?.[name];
+  if (!src) return null;
+  return { source: src, prompt: titleOf(src), about: aboutOf(src), idea: name, provider: null, template: null, draftWarnings: [], compile: null, check: null };
+}
+
 /** Editor state from a drafter result (client.js draftHookscript). */
 export function stateFromDraft(d, prompt) {
   const compiled = !!d.bytecodeHex;
@@ -49,7 +72,7 @@ export function launchProblem(st) {
 export function editorHTML(st, key, { rows = 9, label = 'Hookscript' } = {}) {
   const lines = Math.max(rows, Math.min(22, (st.source.match(/\n/g)?.length ?? 0) + 2));
   return `<div class="hse" data-hse-box="${esc(key)}">
-    <div class="hse-top"><span class="pixel">${esc(label)}</span>${st.provider ? `<span class="hse-by">${st.provider === 'anthropic' ? `drafted by Claude` : `drafted offline${st.template ? ` · ${esc(st.template)} template` : ''}`}</span>` : ''}<span class="chip warnc" title="No hookrz reviewer has signed off on this Hookscript yet">Unreviewed</span></div>
+    <div class="hse-top"><span class="pixel">${esc(label)}</span>${st.provider ? `<span class="hse-by">${st.provider === 'anthropic' ? `drafted by Claude` : st.provider === 'local' ? `drafted by the hookrz model` : `drafted offline${st.template ? ` · ${esc(st.template)} template` : ''}`}</span>` : ''}<span class="chip warnc" title="No hookrz reviewer has signed off on this Hookscript yet">Unreviewed</span></div>
     <textarea class="hse-src" data-hse="${esc(key)}" rows="${lines}" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Hookscript source">${esc(st.source)}</textarea>
     <div class="hse-meta" data-hse-meta>${metaHTML(st)}</div>
     <div class="hse-diag" data-hse-diag aria-live="polite">${diagHTML(st)}</div>
@@ -80,7 +103,7 @@ export function checkHTML(st) {
   const exit = hp.maxExitHours > 0.01 ? `the longest wait was ${hp.maxExitHours < 1 ? `${Math.max(1, Math.round(hp.maxExitHours * 60))}m` : hp.maxExitHours < 48 ? `${+hp.maxExitHours.toFixed(1)}h` : `${+(hp.maxExitHours / 24).toFixed(1)}d`}` : 'nobody had to wait';
   return `<div class="hse-fuzz">
       <div><span>Fuzzed</span><b class="mono">${n(k.trades)}</b><small>trades${k.launches ? ` · ${n(k.launches)} launches` : ''}</small></div>
-      <div><span>Refused</span><b class="mono">${(+k.refusedPct).toFixed(1)}%</b></div>
+      <div><span>Blocked</span><b class="mono">${(+k.refusedPct).toFixed(1)}%</b></div>
       <div><span>Panics · errors</span><b class="mono ${k.panics || k.errors ? 'bad' : 'good'}">${n(k.panics)} · ${n(k.errors)}</b></div>
       <div><span>CU seen</span><b class="mono">${n(k.avgCu)}</b><small>avg · ${n(k.maxCu)} max</small></div>
     </div>
@@ -204,7 +227,7 @@ export async function mountTester(el, getSource) {
     const g = abi?.globals ?? [], wv = abi?.wallet ?? [];
     el.querySelector('[data-o="state"]').innerHTML = !w ? '' : `<div class="hst-wallets">${w.wallets.slice(0, NAMES.length).map((x, i) => `<div><span>${NAMES[i]}</span><b class="mono">${tok(x.balance)}</b>${wv.length ? `<small>${wv.map((f) => `${esc(f.name)} ${esc(val(x.vars, f))}`).join(' · ')}</small>` : ''}</div>`).join('')}</div>
       ${g.length ? `<p class="hst-globals"><span class="dim">Coin state</span> ${g.map((f) => `<span class="mono">${esc(f.name)}</span> = <b>${esc(val(w.globals, f))}</b>`).join(' · ')}</p>` : ''}`;
-    el.querySelector('[data-o="log"]').innerHTML = log.slice(0, 6).map((x) => `<li class="${x.ok ? 'ok' : 'no'}"><span class="mono dim">+${dur(x.t)}</span><span>${esc(x.what)}</span><b>${x.ok ? 'Lands' : `Refused ${x.code}`}</b></li>`).join('');
+    el.querySelector('[data-o="log"]').innerHTML = log.slice(0, 6).map((x) => `<li class="${x.ok ? 'ok' : 'no'}"><span class="mono dim">+${dur(x.t)}</span><span>${esc(x.what)}</span><b>${x.ok ? 'Goes through' : 'Blocked'}</b>${x.ok ? '' : `<span class="mono dim" title="error code">${x.code}</span>`}</li>`).join('');
   }
   function run() {
     const v = el.querySelector('[data-o="v"]');
@@ -223,8 +246,8 @@ export async function mountTester(el, getSource) {
     if (!o) { v.className = 'hst-verdict no'; v.innerHTML = '<p>The curve has no more tokens to sell.</p>'; return; }
     const r = o.result;
     if (r.error) { v.className = 'hst-verdict no'; v.innerHTML = `<b class="hst-vt">Fault</b><p>The VM stopped with ${esc(r.error)}. The engine refuses the transfer (6128).</p>`; log.unshift({ t, what, ok: false, code: 6128 }); }
-    else if (r.verdict.allow) { v.className = 'hst-verdict ok'; v.innerHTML = `<b class="hst-vt">Lands</b><p>${esc(what)}${K.kind === 'buy' ? `: ${tok(o.ctx.amount)} tokens` : ''}. The script allowed it and kept its state changes. <span class="mono dim">${n(r.gas)} CU</span></p>`; log.unshift({ t, what, ok: true }); }
-    else { const msg = hs.formatReason(code, r.verdict.reasonId, r.verdict.arg); v.className = 'hst-verdict no'; v.innerHTML = `<b class="hst-vt">Refused <span class="mono">6128</span></b><p class="msg">${esc(msg)}</p><p class="dim">${esc(what)}. Nothing changed. <span class="mono">${n(r.gas)} CU</span></p>`; log.unshift({ t, what, ok: false, code: 6128 }); }
+    else if (r.verdict.allow) { v.className = 'hst-verdict ok'; v.innerHTML = `<b class="hst-vt">Goes through</b><p>${esc(what)}${K.kind === 'buy' ? `: ${tok(o.ctx.amount)} tokens` : ''}. The script allowed it and kept its state changes. <span class="mono dim">${n(r.gas)} CU</span></p>`; log.unshift({ t, what, ok: true }); }
+    else { const msg = hs.formatReason(code, r.verdict.reasonId, r.verdict.arg); v.className = 'hst-verdict no'; v.innerHTML = `<b class="hst-vt">Blocked <span class="mono dim" title="error code">6128</span></b><p class="msg">${esc(msg)}</p><p class="dim">${esc(what)}. Nothing changed. <span class="mono">${n(r.gas)} CU</span></p>`; log.unshift({ t, what, ok: false, code: 6128 }); }
     t += 1;
     render();
   }

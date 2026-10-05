@@ -75,7 +75,7 @@ export function errorTable() {
 }
 
 // ───────── fees ─────────
-const FEE_TONE = { Creator: 'c', hookrz: 'p', 'Stack author': 'a' };
+const FEE_TONE = { Creator: 'c', hookrz: 'p' };
 export function feesVisual() {
   const cells = FEES.split.flatMap((s) => Array.from({ length: s.pct }, () => FEE_TONE[s.who] ?? 'p'));
   const per = 1000 * FEES.tradeFeePct / 100;

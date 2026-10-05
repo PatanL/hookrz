@@ -69,7 +69,7 @@ const SCEN = {
   'seasoned-sells': { knobs: ['srcBal', 'heldH'], refuse: { kind: 'sell', amountPct: 0.5, srcBal: 1, heldH: 0.5, t: 7200 }, land: { heldH: 5, t: 21600 } },
   'outflow-cap': { knobs: ['srcBal', 'hourSold'], refuse: { kind: 'sell', amountPct: 1, srcBal: 2, hourSold: 4.5 }, land: { hourSold: 2 } },
   'lock-in': { knobs: ['srcBal', 'progress'], refuse: { kind: 'sell', amountPct: 0.2, srcBal: 1, progress: 12 }, land: { progress: 40 } },
-  'creator-vest': { knobs: ['isCreatorSrc', 'srcBal'], refuse: { kind: 'sell', amountPct: 0.5, srcBal: 2, isCreatorSrc: true, t: 86400 }, land: { t: 345600 } },
+  'creator-vest': { knobs: ['isCreatorSrc', 'srcBal'], refuse: { kind: 'sell', amountPct: 0.5, srcBal: 2, isCreatorSrc: true, t: 86400 }, land: { amountPct: 0.05, t: 345600 } },
   'token-gate': { knobs: ['gateBal'], refuse: { kind: 'buy', amountPct: 0.2, gateBal: 1000 }, land: { gateBal: 500000 } },
   'chapters': { knobs: ['dstBal', 'progress'], refuse: { kind: 'buy', amountPct: 0.4, dstBal: 0.3, progress: 10 }, land: { progress: 50 } },
 };

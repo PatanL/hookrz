@@ -1,0 +1,23 @@
+{
+  "name": "hookscript",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hookscript: compiler, reference interpreter, fuzzer and drafter for hookrz Custom blocks",
+  "engines": { "node": ">=22.6" },
+  "exports": {
+    ".": "./compiler/src/index.ts",
+    "./compiler": "./compiler/src/index.ts",
+    "./fuzz": "./fuzz/fuzz.ts",
+    "./drafter": "./drafter/draft.ts"
+  },
+  "scripts": {
+    "test": "node compiler/test/compiler.test.ts && node compiler/test/parity.ts && node fuzz/run.ts examples/*.hs",
+    "parity": "node compiler/test/parity.ts",
+    "fuzz": "node fuzz/run.ts examples/*.hs",
+    "examples": "node compiler/bin/hsc.ts examples/*.hs"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/sdk": "*"
+  }
+}

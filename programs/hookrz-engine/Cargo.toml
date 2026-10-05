@@ -1,0 +1,33 @@
+[package]
+name = "hookrz-engine"
+version = "0.1.0"
+edition = "2021"
+description = "hookrz_engine: one Token-2022 transfer hook for every hookrz coin. Runs the coin's rule stack (prebuilt blocks + Hookscript) on every transfer; it can only refuse."
+license = "Apache-2.0"
+publish = false
+
+[lib]
+name = "hookrz_engine"
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = ["hookscript"]
+no-entrypoint = []
+custom-heap = []
+custom-panic = []
+# Link the Hookscript VM (hookrz/hookscript/vm). Default on; `--no-default-features` builds without it, and then
+# init_stack refuses stacks that carry a script.
+hookscript = ["dep:hookscript-vm"]
+
+[dependencies]
+solana-program = "2.2"
+hookscript-vm = { path = "../../hookscript/vm", optional = true }
+
+[dev-dependencies]
+serde_json = "1"
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
+opt-level = 3

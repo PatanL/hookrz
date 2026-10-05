@@ -240,8 +240,9 @@ export const BLOCKS = [
       { key: 'days', label: 'Vests over', min: 7, max: 365, step: 1, def: 30, fmt: (v) => `${v}d` },
     ],
     summary: (p) => `${p.cliff}d cliff · ${p.days}d`,
-    error: (p) => `Creator vesting: ${p.cliff}-day cliff, then unlocks over ${p.days} days`,
-    check: (c, p) => c.isCreatorSrc && c.kind !== 'buy' && c.t < (p.cliff * 86400),
+    error: (p) => `Creator vesting: the launch bag is locked for ${p.cliff} days, then unlocks in a straight line over ${p.days} days`,
+    // c.creatorBase: what the creator bought in the slot of its first buy (the launch buy). Coins it got later are free.
+    check: (c, p) => c.isCreatorSrc && c.kind !== 'buy' && c.srcBefore - c.amount < vestLocked(p, c.t, c.creatorBase ?? c.srcBefore),
   },
   {
     id: 'holder-rewards', code: null, family: 'flow', name: 'Holder Rewards', enforcedBy: 'crank', state: 'none', route: 'any', cu: 0, accts: 0,
@@ -347,6 +348,12 @@ export function capAt(p, t) {
 }
 export function chapterOf(p, progress) {
   return Math.min(p.n - 1, Math.floor(progress * p.n));
+}
+/** Creator Vesting: the part of the launch bag still locked at t (nothing vests before the cliff, then a straight line). */
+export function vestLocked(p, t, base) {
+  const cliff = p.cliff * 86400, span = p.days * 86400;
+  if (t < cliff) return base;
+  return base * (1 - Math.min(1, (t - cliff) / span));
 }
 export function freeBalance(c, holdS) {
   const locked = (c.w.lots ?? []).filter((l) => c.t - l.t < holdS).reduce((a, l) => a + l.amt, 0);

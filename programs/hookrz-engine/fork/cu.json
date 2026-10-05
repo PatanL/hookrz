@@ -1,0 +1,184 @@
+{
+ "base": {
+  "buy": {
+   "engine": 2671,
+   "tx": 20312
+  },
+  "sell": {
+   "engine": 2661,
+   "tx": 14302
+  },
+  "send": {
+   "engine": 2643,
+   "tx": 15784
+  }
+ },
+ "rows": [
+  {
+   "what": "engine base (dispatch, C1 checks, Stack, classification; 1 trivial slot)",
+   "buy": 2671,
+   "sell": 2661,
+   "send": 2643
+  },
+  {
+   "what": "snipe-shield",
+   "buy": 2681,
+   "sell": 2656,
+   "send": 2648,
+   "marginal": 10
+  },
+  {
+   "what": "anti-bundle",
+   "buy": 2729,
+   "sell": 2684,
+   "send": 2676,
+   "marginal": 58
+  },
+  {
+   "what": "max-wallet",
+   "buy": 2774,
+   "sell": 2652,
+   "send": 2756,
+   "marginal": 113
+  },
+  {
+   "what": "rising-max",
+   "buy": 2960,
+   "sell": 2650,
+   "send": 2943,
+   "marginal": 300
+  },
+  {
+   "what": "sandwich-guard",
+   "buy": 4078,
+   "sell": 4147,
+   "send": 5002,
+   "marginal": 2359
+  },
+  {
+   "what": "sell-cap",
+   "buy": 2662,
+   "sell": 2763,
+   "send": 2644,
+   "marginal": 102
+  },
+  {
+   "what": "sell-cooldown",
+   "buy": 4077,
+   "sell": 4151,
+   "send": 5001,
+   "marginal": 2358
+  },
+  {
+   "what": "hold-timer",
+   "buy": 4109,
+   "sell": 4241,
+   "send": 5145,
+   "marginal": 2502
+  },
+  {
+   "what": "circuit-breaker",
+   "buy": 4433,
+   "sell": 4425,
+   "send": 3303,
+   "marginal": 1764
+  },
+  {
+   "what": "lock-in",
+   "buy": 2985,
+   "sell": 3086,
+   "send": 2967,
+   "marginal": 425
+  },
+  {
+   "what": "creator-vest",
+   "buy": 2696,
+   "sell": 2686,
+   "send": 2678,
+   "marginal": 35
+  },
+  {
+   "what": "custom:empty",
+   "buy": 5494,
+   "sell": 5528,
+   "send": 6480,
+   "marginal": 3837
+  },
+  {
+   "what": "custom:feegate",
+   "buy": 8111,
+   "sell": 7821,
+   "send": 8773,
+   "marginal": 6130
+  },
+  {
+   "what": "custom:koth",
+   "buy": 6903,
+   "sell": 6424,
+   "send": 7139,
+   "marginal": 4496
+  },
+  {
+   "what": "custom:heavy",
+   "buy": 15984,
+   "sell": 16156,
+   "send": 17567,
+   "marginal": 14924
+  },
+  {
+   "what": "trading-hours",
+   "buy": 2671,
+   "sell": 2661,
+   "send": 2643,
+   "marginal": 0
+  }
+ ],
+ "worst": [
+  {
+   "what": "hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + rising-max",
+   "buy": 6763,
+   "buyTx": 38882,
+   "sell": 6771,
+   "sellTx": 38890,
+   "send": 6688,
+   "sendTx": 40308
+  },
+  {
+   "what": "hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + anti-bundle + snipe-shield",
+   "buy": 6528,
+   "buyTx": 32647,
+   "sell": 6675,
+   "sellTx": 29794,
+   "send": 6402,
+   "sendTx": 35522
+  },
+  {
+   "what": "hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + custom:koth",
+   "buy": 8970,
+   "buyTx": 56186,
+   "sell": 8759,
+   "sellTx": 33475,
+   "send": 8206,
+   "sendTx": 34423
+  },
+  {
+   "what": "hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + custom:heavy",
+   "buy": 18502,
+   "buyTx": 40218,
+   "sell": 18942,
+   "sellTx": 46658,
+   "send": 19085,
+   "sendTx": 49802
+  },
+  {
+   "what": "hold-timer + circuit-breaker + anti-bundle + rising-max + creator-vest + custom:heavy",
+   "buy": 18850,
+   "buyTx": 48066,
+   "sell": 18781,
+   "sellTx": 41997,
+   "send": 19399,
+   "sendTx": 48616
+  }
+ ],
+ "max": 19399
+}

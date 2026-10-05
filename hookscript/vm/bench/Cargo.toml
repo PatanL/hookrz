@@ -1,0 +1,21 @@
+[package]
+name = "hookscript-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "sBPF CU bench for hookscript-vm: runs a script with a per-op tracer and returns per-op CU deltas."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+solana-program = "=2.3.0"
+hookscript-vm = { path = ".." }
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+
+[workspace]

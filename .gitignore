@@ -5,3 +5,13 @@ brand/gen/*.png
 brand/gen/*.log
 *.log
 .DS_Store
+.secrets/
+programs/*/target/
+hookscript/vm/target/
+server/node_modules/
+server/.runtime/
+*.so.tmp
+
+# program keypairs: if public, anyone can deploy to our program address first
+**/program-keypair.json
+**/target/

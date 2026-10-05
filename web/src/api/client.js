@@ -1,20 +1,57 @@
 // The only door between the UI and the backend. MODE 'demo' answers from seeded data + the
-// reference engine in the browser; MODE 'live' will fetch API_BASE with the same shapes.
+// reference engine in the browser; MODE 'live' fetches the hookrz server (server/) with the same shapes.
+// Live mode is opt-in: build or serve the site with VITE_API_BASE set (see web/.env.example).
 // Every function here is one endpoint in src/api/contract.js (see `fn`).
-import { API_BASE, LAUNCH_IXS, FEES } from './contract.js';
+import { LAUNCH_IXS, FEES } from './contract.js';
 import { BLOCKS, byId, ENGINE } from '../data/blocks.js';
 import { COINS, coinBy, stats, childrenOf, CREATORS, fakeKey, SOL_USD, curveMcapSol } from '../data/coins.js';
 import { budget, evaluate, normalize } from '../engine/engine.js';
 import { simulate as runSim, Curve, SUPPLY, rng } from '../engine/sim.js';
 
-export const MODE = 'demo';
+const ENV_API = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE) || '';
+export const API_BASE = ENV_API.replace(/\/$/, '');
+export const MODE = API_BASE ? 'live' : 'demo';
 const wait = (ms = 120) => new Promise((r) => setTimeout(r, ms));
 const LS = 'hookrz:launches';
 
 async function live(path, body) {
   const res = await fetch(API_BASE + path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {});
-  if (!res.ok) throw new Error(`${path} ${res.status}`);
+  if (!res.ok) {
+    let j = null; try { j = await res.json(); } catch { /* not JSON */ }
+    const e = new Error(j?.message ?? `${path} ${res.status}`);
+    Object.assign(e, { status: res.status, code: j?.error, details: j?.details });
+    throw e;
+  }
   return res.json();
+}
+/** GET that answers null on 404 (a ticker nobody has launched yet). */
+async function liveOrNull(path) {
+  try { return await live(path); } catch (e) { if (e.status === 404) return null; throw e; }
+}
+
+// ───────── live mode: the wallet signs and sends; the server builds, relays and indexes ─────────
+const b64bytes = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+/** wallet.js handles call tx.serialize(); a prepared transaction is already serialized bytes. */
+const wireTx = (b64) => { const bytes = b64bytes(b64); return { serialize: () => bytes }; };
+async function walletHandle() {
+  const w = await import('../wallet/wallet.js');
+  const h = await w.connect();
+  return { h, address: w.address };
+}
+/** Waits until the server has the transaction (landed or refused). */
+async function waitTx(sig, ms = 90_000) {
+  const end = Date.now() + ms;
+  for (;;) {
+    const r = await liveOrNull(`/v1/tx/${sig}`);
+    if (r) return r;
+    if (Date.now() > end) throw new Error('The transaction was not confirmed in time. Check your wallet before trying again.');
+    await wait(900);
+  }
+}
+async function signSendWait(h, b64) {
+  const sig = await h.signAndSend(wireTx(b64));
+  const rec = await waitTx(sig);
+  return { sig, rec };
 }
 
 /** Coins launched from this browser while MODE is 'demo' (kept in localStorage, never sent anywhere). */
@@ -37,7 +74,8 @@ export function shapeCoin(c) {
 }
 
 export const api = {
-  async blocks() { if (MODE === 'live') return live('/v1/blocks'); await wait(30); return BLOCKS; },
+  // the catalog is code shared with the engine (check/format functions), so it is read locally in both modes
+  async blocks() { await wait(30); return BLOCKS; },
 
   async coins({ sort = 'mcap', family, phase, q } = {}) {
     if (MODE === 'live') return live(`/v1/coins?${new URLSearchParams({ sort, family: family ?? '', phase: phase ?? '', q: q ?? '' })}`);
@@ -51,7 +89,7 @@ export const api = {
   },
 
   async coin(ticker) {
-    if (MODE === 'live') return live(`/v1/coins/${ticker}`);
+    if (MODE === 'live') return liveOrNull(`/v1/coins/${encodeURIComponent(ticker)}?optional=1`);
     await wait(60);
     const c = allCoins().find((x) => x.ticker === ticker);
     return c ? shapeCoin(c) : null;
@@ -75,7 +113,11 @@ export const api = {
 
   /** Rule-aware quote. side: buy (amount in SOL) | sell (amount in tokens). */
   async quote({ ticker, side, amount, wallet = {}, stack: stackIn, progress: progressIn, minutesAgo: minutesIn }) {
-    if (MODE === 'live') return live('/v1/quote', { mint: ticker, side, amount, wallet });
+    if (MODE === 'live') {
+      // the server reads the wallet's real state (balance, Wallet record) from chain; send its address
+      const w = await import('../wallet/wallet.js');
+      return live('/v1/quote', { mint: ticker, side, amount, wallet: w.address ?? null });
+    }
     const c = allCoins().find((x) => x.ticker === ticker) ?? { stack: stackIn ?? [], progress: progressIn ?? 0.05, minutesAgo: minutesIn ?? 10 };
     const curve = new Curve();
     // warp the curve to the coin's progress
@@ -132,8 +174,8 @@ export const api = {
     return draftDemo(prompt);
   },
 
-  async prepareLaunch({ meta, stack, curve = {}, creator = 'DEMO' }) {
-    if (MODE === 'live') return live('/v1/launch/prepare', { meta, stack, curve, creator });
+  async prepareLaunch({ meta, stack, curve = {}, creator = 'DEMO', parent = null, mint = null }) {
+    if (MODE === 'live') return live('/v1/launch/prepare', { meta, stack, curve, creator: creator === 'DEMO' ? null : creator, parent, mint });
     await wait(500);
     const b = budget(stack);
     const ixs = LAUNCH_IXS.filter((x, i) => b.hasHook || i !== 3).map((x) => ({ ...x }));
@@ -144,7 +186,19 @@ export const api = {
 
   /** Demo "launch": nothing is sent; the coin is saved in this browser so the rest of the site shows it. */
   async submitLaunch({ meta, stack, parent = null, prepared }) {
-    if (MODE === 'live') return live('/v1/launch/submit', { signed: prepared });
+    if (MODE === 'live') {
+      // Rebuild for the connected wallet (same mint, fresh blockhash, parent stack attached), then the wallet
+      // signs and sends each transaction in order; the server confirms and indexes the coin.
+      const { h, address } = await walletHandle();
+      const P = await live('/v1/launch/prepare', { meta, stack, creator: address, parent, mint: prepared?.mint ?? null });
+      const signatures = [];
+      for (const t of P.transactions) {
+        const { sig, rec } = await signSendWait(h, t.base64);
+        if (!rec.ok) throw new Error(`Launch transaction refused (${rec.code ?? rec.error}). Nothing after it was sent.`);
+        signatures.push(sig);
+      }
+      return live('/v1/launch/submit', { mint: P.mint, signatures, manifest: prepared?.manifest ?? null, manifestSignature: prepared?.manifestSignature ?? null });
+    }
     await wait(1200);
     const coin = {
       ticker: meta.ticker.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10), name: meta.name, creator: 'you', minutesAgo: 0, progress: 0.002, parent,
@@ -157,6 +211,25 @@ export const api = {
     return { ok: true, ticker: coin.ticker, signature: fakeKey(Date.now() % 9973, '') };
   },
 
+  /** Unsigned swap for the connected wallet: hook accounts resolved, Wallet record opened if the stack needs one. */
+  async prepareTrade({ ticker, side, amount, wallet, slippageBps = 300 }) {
+    if (MODE === 'live') return live('/v1/trade/prepare', { mint: ticker, side, amount, wallet, slippageBps });
+    await wait(200);
+    return { mint: null, ticker, side, amount, transaction: null, demo: true };
+  },
+
+  /** Prepare → the wallet signs and sends → the chain's verdict. Demo: a simulated landing. */
+  async trade({ ticker, side, amount, slippageBps = 300 }) {
+    if (MODE === 'live') {
+      const { h, address } = await walletHandle();
+      const P = await live('/v1/trade/prepare', { mint: ticker, side, amount, wallet: address, slippageBps });
+      const { sig, rec } = await signSendWait(h, P.transaction);
+      return { ok: rec.ok, signature: sig, code: rec.code ?? null, error: rec.error ?? null, slot: rec.slot, openedRecords: P.openedRecords ?? [] };
+    }
+    await wait(1300 + Math.random() * 700);
+    return { ok: true, signature: fakeKey(Date.now() % 99991, ''), code: null, error: null, demo: true };
+  },
+
   async creator(handle) {
     if (MODE === 'live') return live(`/v1/creators/${handle}`);
     const list = await api.coins();
@@ -167,7 +240,12 @@ export const api = {
 
   /** Live stream (WS in live mode). Demo: replays the coin's simulated log on a timer. Returns an unsubscribe fn. */
   stream(ticker, onEvent, { speed = 1, stack: stackIn } = {}) {
-    if (MODE === 'live') { const ws = new WebSocket(API_BASE.replace('http', 'ws') + `/v1/stream?mint=${ticker}`); ws.onmessage = (m) => onEvent(JSON.parse(m.data)); return () => ws.close(); }
+    // live: a coin's real transfers over SSE. Without a ticker the caller animates a stack (the build rack), which stays simulated.
+    if (MODE === 'live' && ticker) {
+      const es = new EventSource(`${API_BASE}/v1/stream?mint=${encodeURIComponent(ticker)}`);
+      es.onmessage = (m) => { try { const e = JSON.parse(m.data); if (e.type === 'trade') onEvent(e); } catch { /* keep-alive */ } };
+      return () => es.close();
+    }
     const c = ticker ? allCoins().find((x) => x.ticker === ticker) : null;
     const stack = c?.stack ?? stackIn ?? [];
     const sim = runSim(stack, { seed: ticker ? ticker.length * 97 : 7 });

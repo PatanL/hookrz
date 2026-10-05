@@ -107,6 +107,8 @@ export function simulate(stackIn, { seed = 7 } = {}) {
   const W = (id) => { if (!ws.has(id)) ws.set(id, { lots: [], lastBuySlot: null, lastSellT: null, firstT: null, sold: false, spent: 0, got: 0 }); return ws.get(id); };
   const B = (id) => bal.get(id) ?? 0;
   const slotBuys = new Map(), hourSold = new Map(), windowOpen = new Map();
+  // Creator Vesting state, as the engine keeps it: the creator's buys in the slot of its first buy.
+  let creatorBase = null, creatorBaseSlot = null;
   const breaker = stack.find((s) => s.id === 'circuit-breaker');
   const byBlock = {}, byType = {}, log = [], series = [];
   let burnedSol = 0, feesSol = 0, landed = 0, refused = 0, gradT = null;
@@ -131,7 +133,7 @@ export function simulate(stackIn, { seed = 7 } = {}) {
       kind: ev.kind, amount, supply: SUPPLY, t: ev.t, slot, hour: Math.floor(LAUNCH_HOUR_UTC + ev.t / 3600) % 24,
       progress: curve.progress, priceAfter, windowOpenPrice: windowOpen.get(wIdx) ?? 0,
       srcBefore: ev.kind === 'buy' ? 0 : B(ev.w), dstAfter: ev.kind === 'sell' ? 0 : B(toId) + amount,
-      isCreatorSrc: w.type === 'creator' && ev.kind !== 'buy', isCreator: w.type === 'creator', w: st,
+      isCreatorSrc: w.type === 'creator' && ev.kind !== 'buy', isCreator: w.type === 'creator', w: st, creatorBase: creatorBase ?? 0,
       slotBuys: slotBuys.get(slot) ?? 0, hourSold: hourSold.get(Math.floor(ev.t / 3600)) ?? 0,
       hasPass: wallets[toId].hasPass, gateBal: wallets[toId].gateBal, blocked: w.blocked || wallets[toId].blocked,
     };
@@ -154,6 +156,9 @@ export function simulate(stackIn, { seed = 7 } = {}) {
       bal.set(ev.w, B(ev.w) + q.out); st.lots.push({ t: ev.t, amt: q.out }); if (st.lots.length > 8) st.lots.shift();
       st.lastBuySlot = slot; st.firstT ??= ev.t; T.spent += sol; feesSol += q.fee; if (fee > 1) burnedSol += q.fee * (fee - 1) / fee;
       slotBuys.set(slot, (slotBuys.get(slot) ?? 0) + 1);
+      if (w.type === 'creator') {
+        if (creatorBase == null) { creatorBase = q.out; creatorBaseSlot = slot; } else if (slot === creatorBaseSlot) creatorBase += q.out;
+      }
       if (curve.graduated && gradT == null) gradT = ev.t;
     } else if (ev.kind === 'sell') {
       const q = curve.applySell(amount, fee);
@@ -163,6 +168,8 @@ export function simulate(stackIn, { seed = 7 } = {}) {
     } else {
       bal.set(ev.w, B(ev.w) - amount); bal.set(toId, B(toId) + amount); consumeLots(st, amount);
       const ds = W(toId); ds.lots.push({ t: ev.t, amt: amount }); ds.firstT ??= ev.t;
+      // The receiver inherits the sender's last buy (the engine's Sandwich Guard taint on sends).
+      if (st.lastBuySlot != null && (ds.lastBuySlot == null || st.lastBuySlot > ds.lastBuySlot)) ds.lastBuySlot = st.lastBuySlot;
     }
     if (log.length < 4000) log.push({ t: ev.t, type: w.type, wallet: ev.w, kind: ev.kind, amount, sol, ok: true, verdicts: v.verdicts });
   }

@@ -53,7 +53,6 @@ app.innerHTML = `
         <h1 class="chrome-text">How hookrz works</h1>
         <p class="lede">One Token-2022 transfer-hook program runs every coin's stack of rule blocks on every transfer. This is how it's built, what it refuses, who gets paid and what you can call.</p>
       </div>
-      <img class="dc-hero-img" src="${asset('img/brand/engine-rack-900.webp')}" alt="Six chrome blocks seated in the engine rack, a light cable running through them" width="900" height="506">
     </div>
     <dl class="dc-facts">
       <div><dt>Engine</dt><dd class="mono">${ENGINE.program}</dd></div>

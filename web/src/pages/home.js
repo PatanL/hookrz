@@ -73,7 +73,6 @@ app.innerHTML = `
 <section class="section engine" id="engine">
   <div class="wrap engine-grid">
     <figure class="engine-art">
-      <img class="rv" src="img/brand/engine-rack.webp" srcset="img/brand/engine-rack-900.webp 900w, img/brand/engine-rack.webp 1672w" sizes="(max-width: 1020px) 100vw, 760px" alt="The hookrz engine: six block slots on one cable" width="1672" height="941" decoding="async">
       <figcaption class="engine-vs rv">
         <div class="vs-row old">
           <span class="vs-k pixel">One program, one rule</span>

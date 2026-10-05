@@ -238,8 +238,7 @@
 /* ═════════════ ENGINE ═════════════ */
 .engine-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: clamp(32px, 5vw, 72px); align-items: center; }
 .engine-art { margin: 0; position: relative; }
-.engine-art img { width: 122%; max-width: none; height: auto; margin: -9% 0 -7% -13%; mix-blend-mode: screen; }
-.engine-vs { display: grid; gap: 0; margin-top: 8px; }
+.engine-vs { display: grid; gap: 0; margin-top: 0; }
 .vs-row { display: grid; grid-template-columns: 150px auto minmax(0, 1fr); gap: 18px; align-items: center; padding: 14px 0; border-top: 1px solid var(--line); }
 .vs-row:last-child { border-bottom: 1px solid var(--line); }
 .vs-k { font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ice); }
@@ -584,7 +583,6 @@
   .fee-ex { padding: 22px 0 0; border-left: 0; border-top: 1px solid var(--line); }
   .how-head { grid-template-columns: minmax(0, 1fr); }
   .how-art { display: none; }
-  .engine-art img { width: 108%; margin: -6% -4% -5%; }
   .vs-row { grid-template-columns: auto minmax(0, 1fr); row-gap: 8px; }
   .vs-k { grid-column: 1 / -1; }
   .fam-grid, .coin-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

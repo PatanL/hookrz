@@ -10,7 +10,6 @@ import { usd, pctS, num, ago, esc } from '../core/format.js';
 import { miniStack, handleOf, installTips, chg, testChip } from '../ui/coin-shared.js';
 import { presetCards } from '../ui/coin-presets.js';
 import { reconcile } from '../ui/coin-feed.js';
-import { asset } from '../ui/voxel.js';
 
 mountChrome('coins');
 installTips();
@@ -113,7 +112,6 @@ function zero() {
         <p class="lede">Snap rule blocks into a stack and launch it; the first coin shows up here with every transfer the engine checks.</p>
         <div class="cx-zero-cta"><a class="btn btn-chrome btn-lg" href="build.html">Build the first coin</a><a class="btn btn-glass btn-lg" href="build.html#presets">Start from a preset</a></div>
       </div>
-      <div class="cx-zero-art" aria-hidden="true"><img src="${asset('img/brand/engine-rack-900.webp')}" alt="" width="900" height="506"></div>
     </div>
     <div class="cx-zero-h3"><h3>Starter stacks</h3><span class="dim">Open one in Build, tune it, launch.</span></div>
     ${presetCards()}

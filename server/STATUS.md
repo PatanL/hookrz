@@ -274,3 +274,10 @@ cd web && VITE_API_BASE=http://127.0.0.1:8830 npx vite --host 127.0.0.1 --port 4
   with that id, or a switch to the runtime `program_id`.
 - **Coordinator:** apply `web-patches/coin-ticket-live.patch` so the trade ticket sends the real prepared transaction.
 - Keeper phase 2: burns, royalties and Hookscript payouts are typed stubs.
+
+## Devnet: hookrz_engine deployed and enforcing (2026-10-04)
+- **Program `5bewmrVEU8PZYqRQrYABwQB45tBuFMT4PVuWj2GiAQFQ`** (slim .so, 145,704 B). Deployed by `scripts/deploy-engine.cjs`: the BPF upgradeable loader driven from JS, because this ARM box has no Solana CLI. It creates a buffer, writes 154 chunks of 950 B, verifies them, then deploys at the exact size. Program-data rent is **0.741 SOL**; the whole deploy cost about 0.743 SOL. The upgrade authority is the devnet deployer `9zpog7…`.
+- `scripts/devnet-engine-smoke.ts` (Helius devnet RPC):
+  - **Fair Launch** (snipe-shield 60 s / 0.3%, anti-bundle, rising-max): launch txs of 1,165 B + 524 B. The quote said the largest allowed buy was ≈0.0009 SOL. Buys of 0.002 and 0.5 SOL were both **refused on chain with 6001**: `5gfBCH…`, `2dsdW1…`.
+  - **King of the Hill (Hookscript)**: launch txs of 1,165 B + 670 B. The king's buy **landed** (`LgowWy…`). The king's sell was **refused on chain with 6128** (`wfBGNK…`).
+- To redeploy: `node scripts/deploy-engine.cjs <rpc> <payer.json> <program-keypair.json> ../programs/hookrz-engine/hookrz_engine.so`. Upgrades need an Upgrade instruction (not written yet).

@@ -1,8 +1,8 @@
 // Syntax tint for Hookscript and JSON, shared by the docs and the Custom block drawer.
 import { esc } from '../core/format.js';
 
-const KW = new Set(['rule', 'when', 'let', 'refuse', 'if', 'because', 'and', 'or', 'not', 'in']);
-const NS = /^(transfer|wallet|clock|curve)\.[a-z_]+/;
+const KW = new Set(['rule', 'timezone', 'global', 'payout', 'on', 'when', 'let', 'set', 'refuse', 'allow', 'if', 'else', 'then', 'unless', 'because', 'and', 'or', 'not', 'in', 'is', 'to', 'as', 'where']);
+const NS = /^(transfer|wallet|clock|curve|coin|sender|receiver|buyer|seller|other|moon|from)\.[a-z_]+/;
 
 /** Hookscript source -> tinted HTML (one token pass, no regex soup over HTML). */
 export function tintHookscript(src) {

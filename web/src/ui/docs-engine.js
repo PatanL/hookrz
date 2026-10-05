@@ -54,7 +54,10 @@ export const STACK_LAYOUT = rows([
   ['launch_slot', 'u64', 8, 'Slot of init_stack: time zero for every block', 't'],
   ['launch_ts', 'i64', 8, 'Unix time of init_stack', 't'],
   [`slots[${ENGINE.maxSlots}]`, '[Slot; 6]', ENGINE.maxSlots * 58, `${ENGINE.maxSlots} × 58 bytes, run in order`, 's'],
-  ['script', '[u8; 64]', 64, 'Compiled Hookscript: up to 16 four-byte ops (Custom block)', 'x'],
+  ['script', 'Pubkey', 32, 'The Script account holding the Custom block\'s Hookscript; zero if the stack has none', 'x'],
+  ['last_sqrt', 'u128', 16, 'Curve sqrt price after the last trade (Circuit Breaker)', 'x'],
+  ['migration_quote_threshold', 'u64', 8, 'Copied from the DBC config at init (Lock-in, curve progress)', 'x'],
+  ['activation_point', 'u64', 8, 'The pool\'s activation point, for the fee a Hookscript reads', 'x'],
   ['reserved', '[u8; 4]', 4, '', 'x'],
 ]);
 export const SLOT_LAYOUT = rows([
@@ -66,14 +69,34 @@ export const WALLET_LAYOUT = rows([
   ['discriminator', '[u8; 8]', 8, 'Account type tag', 'h'],
   ['version', 'u8', 1, 'Layout version (1)', 'h'],
   ['bump', 'u8', 1, 'PDA bump', 'h'],
-  ['flags', 'u8', 1, 'Has pass · has sold · crowned', 'h'],
-  ['lot_count', 'u8', 1, '0 to 5', 'h'],
+  ['flags', 'u8', 1, 'Has bought · has sold · has received', 'h'],
+  ['lot_count', 'u8', 1, 'Receipt lots in use, 0 to 5', 'h'],
   ['first_receipt_ts', 'i64', 8, 'First time this account received the coin. Seasoned Sells, Diamond Tiers, wallet.first_receipt', 't'],
-  ['last_buy_slot', 'u64', 8, 'Sandwich Guard', 't'],
+  ['last_buy_slot', 'u64', 8, 'Sandwich Guard; carried to the receiver of a send', 't'],
   ['last_sell_ts', 'i64', 8, 'Sell Cooldown', 't'],
-  ['lots[5]', '[Lot; 5]', 60, '5 × { seconds since launch u32, amount u64 }. Hold Timer, wallet.received(window)', 's'],
+  ['lots_in[5]', '[Lot; 5]', 60, '5 × { seconds since launch u32, amount u64 }. Hold Timer, wallet.received(window)', 's'],
+  ['mint', 'Pubkey', 32, 'The coin', 'k'],
+  ['token_account', 'Pubkey', 32, 'The account this record belongs to', 'k'],
+  ['payer', 'Pubkey', 32, 'Gets the rent back after graduation', 'k'],
+  ['script_vars', '[u8; 32]', 32, 'Hookscript per-wallet state (wallet.NAME)', 'x'],
+  ['last_buy_ts', 'i64', 8, 'wallet.last_buy', 't'],
+  ['bought · sold', 'u64 · u64', 16, 'Cumulative tokens bought from and sold to the curve', 't'],
+  ['buys · sells', 'u32 · u32', 8, 'Counts', 't'],
+  ['n_out', 'u8', 1, 'Outflow lots in use', 'h'],
+  ['reserved', '[u8; 7]', 7, '', 'h'],
+  ['lots_out[5]', '[Lot; 5]', 60, 'Sells and outgoing sends. wallet.sent(window)', 's'],
+  ['reserved', '[u8; 4]', 4, '', 'h'],
 ]);
-const GRP = { h: 'Header', k: 'Keys', t: 'Times', s: 'Slots / lots', x: 'Script' };
+export const SCRIPT_LAYOUT = rows([
+  ['discriminator', '[u8; 8]', 8, 'Account type tag', 'h'],
+  ['version', 'u8', 1, '1 once init_stack seals the script', 'h'],
+  ['bump', 'u8', 1, 'PDA bump', 'h'],
+  ['code_len', 'u16', 2, 'Bytes of bytecode in use', 'h'],
+  ['reserved', '[u8; 4]', 4, '', 'h'],
+  ['globals', '[u8; 256]', 256, 'The script\'s coin-wide state (global NAME), at a fixed offset so the keeper can read it', 's'],
+  ['code', '[u8; 1024]', 1024, 'The compiled Hookscript: header, constant keys, refusal messages, ops', 'x'],
+]);
+const GRP = { h: 'Header', k: 'Keys', t: 'Times', s: 'Slots / lots / state', x: 'Script' };
 
 export function byteMap(layout, total) {
   const groups = [];

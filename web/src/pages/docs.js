@@ -7,7 +7,7 @@ import { FEES, SERVICES } from '../api/contract.js';
 import { api } from '../api/client.js';
 import { esc } from '../core/format.js';
 import { tintHookscript } from '../ui/docs-hookscript.js';
-import { archDiagram, STACK_LAYOUT, SLOT_LAYOUT, WALLET_LAYOUT, byteMap, layoutTable, metaTable, budgetPanel, launchTimeline, txBar, solf } from '../ui/docs-engine.js';
+import { archDiagram, STACK_LAYOUT, SLOT_LAYOUT, WALLET_LAYOUT, SCRIPT_LAYOUT, byteMap, layoutTable, metaTable, budgetPanel, launchTimeline, txBar, solf } from '../ui/docs-engine.js';
 import { apiReference, apiExamples, errorTable, feesVisual } from '../ui/docs-ref.js';
 
 mountChrome('docs');
@@ -157,7 +157,7 @@ app.innerHTML = `
       <tr><td>Blocks per stack</td><td class="mono r">${ENGINE.maxSlots}</td><td class="note">One of each block at most.</td></tr>
       <tr><td>Compute per transfer</td><td class="mono r">${n(ENGINE.cuBudget)} CU</td><td class="note">The whole stack, on top of the swap. The engine's own dispatch, account checks and classification cost ${n(ENGINE.cuBase)}.</td></tr>
       <tr><td>Extra accounts</td><td class="mono r">${ENGINE.maxExtraAccounts} + Stack</td><td class="note">Keeps every hooked swap inside one transaction with room for the route.</td></tr>
-      <tr><td>Custom block</td><td class="mono r">8,000 CU</td><td class="note">Worst case, measured by the compiler and the fuzzer.</td></tr>
+      <tr><td>Hookscript</td><td class="mono r">8,000 CU · 1,024 B</td><td class="note">Per script, worst case. The compiler computes it from op costs measured on Solana's VM; the fuzzer confirms it.</td></tr>
       <tr><td>Launch transaction</td><td class="mono r">1,232 bytes</td><td class="note">The Solana packet limit. Every stack fits.</td></tr>
     </tbody></table></div>
     <p>${c('POST /v1/stacks/validate')} checks a stack against every limit before it can launch. Here is its output for the presets, computed live by the same code:</p>
@@ -269,28 +269,35 @@ app.innerHTML = `
   </section>
 
   <section class="dc-sec" id="hookscript">
-    ${head('hookscript', 'Hookscript', 'The Custom block runs a rule you describe in English. The compiler drafts it in Hookscript, a small rule language the engine runs inside its own budget, and tests it before you can launch it.')}
+    ${head('hookscript', 'Hookscript', 'The Custom block runs a rule you describe in English. The drafter writes it in Hookscript, a small rule language; the compiler turns it into bytecode the engine runs inside its own budget; and it\'s fuzzed and checked for honeypots before you can launch it.')}
     <div class="hs-grid">
       <div>
         <h3>What it can read</h3>
         <div class="tscroll"><table class="table dc-hstable"><tbody>
-          ${[['transfer.kind', 'buy · sell · send'], ['transfer.amount', 'tokens in this transfer'], ['wallet.balance', 'sender\'s balance before the transfer'], ['wallet.received(window)', 'tokens received within the window'], ['wallet.first_receipt', 'when this account first got the coin'], ['clock.now', 'unix time'], ['clock.weekday', 'mon … sun, UTC'], ['clock.hour', '0 – 23, UTC'], ['curve.price', 'price after this trade'], ['curve.price_at(ago)', 'price a while ago, from the slot\'s samples'], ['curve.progress', 'share of the curve filled, 0 – 1']].map(([k, v]) => `<tr><td class="mono">${tintHookscript(k)}</td><td class="note">${esc(v)}</td></tr>`).join('')}
+          ${[['transfer.kind', 'buy · sell · send'], ['transfer.amount', 'tokens in this transfer; also value (SOL), trader, from, to, app'], ['wallet.balance', 'the trader\'s balance before the transfer; sender, receiver, buyer, seller work too'], ['wallet.held', 'time since this account first got the coin'], ['wallet.received(window: 1h)', 'tokens in within the window; sent(window) for tokens out'], ['wallet.bought · wallet.sells', 'running totals and counts per wallet'], ['curve.price · curve.progress', 'after this trade; also mcap, raised and the current fee'], ['curve.price_at(ago: 10m)', 'the coin\'s own price a while back'], ['coin.age · coin.creator', 'time since launch, the creator; and the script\'s own globals'], ['clock.hour(tz: "Asia/Tokyo")', 'any clock field in any zone, daylight saving included'], ['daylight() · moon.phase', 'is the sun up somewhere; the moon tonight']].map(([k, v]) => `<tr><td class="mono">${tintHookscript(k)}</td><td class="note">${esc(v)}</td></tr>`).join('')}
         </tbody></table></div>
       </div>
       <div>
         <h3>What it can do</h3>
-        <p>Refuse, with a message: ${c('refuse if &lt;condition&gt; because "…"')}. The trader sees the message with error ${c(hex(0x17f0))}. That's the whole surface.</p>
+        <p>Refuse, with a message: ${c('refuse if &lt;condition&gt; because "…"')}. The trader sees the message with error ${c(hex(0x17f0))}. It can also keep state between transfers: coin-wide ${c('global')} values and a few bytes per wallet, written only when the transfer is allowed. That is enough for games: a King of the Hill crown, every-100th-buy jackpots, invite chains. ${c('payout 50% to king')} tells the public keeper where to send creator fees; the engine itself never moves funds.</p>
         <h3>Limits</h3>
         <ul class="dc-list">
-          <li>No loops and no calls out. Comparisons, arithmetic and the reads on the left.</li>
-          <li>At most 8,000 CU, worst case, or it doesn't compile.</li>
-          <li>16 ops and three constants: it lives in the Stack's script area and its slot.</li>
-          <li>Fuzzed against 10,000 generated trades before launch. Zero panics required; the refusal rate is shown.</li>
+          <li>No loops and no calls out. Branches, comparisons, arithmetic, bounded built-ins and the reads on the left.</li>
+          <li>At most ${n(1024)} bytes of bytecode, ${n(256)} bytes of coin state and 32 bytes per wallet.</li>
+          <li>At most ${n(8000)} CU, worst case, or it doesn't compile. The compiler computes the worst path from op costs measured on Solana's VM.</li>
+          <li>Fuzzed against ${n(10000)} generated trades before launch: zero panics required, and the refusal rate is shown.</li>
+          <li>Honeypot check: in every generated launch each holder must be able to sell out with nobody else trading, and a bank run must get through. A script that can trap holders can't launch.</li>
           <li>The coin page shows an <span class="chip warnchip">Unreviewed</span> badge until a reviewer signs off.</li>
         </ul>
       </div>
     </div>
     <div class="dc-wide hs-ex" id="hsEx"><div class="skel" style="height:240px"></div></div>
+    <div class="dc-acct dc-wide">
+      <div class="dc-acct-h"><h4>Script</h4><code>["script", mint]</code><span class="mono">${n(ENGINE.scriptBytes)} bytes · ${solf(rentSol(ENGINE.scriptBytes))}</span></div>
+      <p>Written by ${c('init_stack')} in the launch (long scripts are staged first with ${c('write_script')}). The bytecode is final; the globals change only when a transfer the script allowed lands. The compiler is deterministic, so anyone can recompile the source shown on the coin page and compare the bytes.</p>
+      ${byteMap(SCRIPT_LAYOUT, ENGINE.scriptBytes)}
+      ${layoutTable(SCRIPT_LAYOUT, { total: ENGINE.scriptBytes })}
+    </div>
   </section>
 
   <section class="dc-sec" id="api">
@@ -317,16 +324,18 @@ app.innerHTML = `
 // ── live panels
 budgetPanel(app.querySelector('#budgetPanel'));
 const fillLater = [];
+const HS_EXAMPLE = 'King of the Hill: the biggest buy takes the crown, and the king can\'t sell for 6h unless someone outbids them';
 fillLater.push(apiExamples(app.querySelector('#apiEx')).then(({ quote, launch }) => {
   app.querySelector('#txBar').innerHTML = txBar(launch.txBytes, launch.txLimit);
   app.querySelector('#quoteEx').innerHTML = quotePanel(quote);
 }));
-fillLater.push(api.draftHookscript('No single sell over a quarter of your bag in your first 2h').then((d) => {
+fillLater.push(api.draftHookscript(HS_EXAMPLE).then((d) => {
+  const hp = d.honeypot ?? {};
   app.querySelector('#hsEx').innerHTML = `<div class="hs-card panel"><div class="hs-top"><span class="pixel">Draft</span><p>“${esc(d.prompt)}”</p><span class="chip warnchip">Unreviewed</span></div>
     <pre class="hs-code"><code>${tintHookscript(d.script)}</code></pre>
-    <dl class="hs-stats"><div><dt>Ops</dt><dd class="num">${d.ops}</dd></div><div><dt>CU</dt><dd class="num">${n(d.cu)}<small> / 8,000</small></dd></div><div><dt>Fuzzed</dt><dd class="num">${n(d.fuzz.trades)}</dd></div><div><dt>Refused</dt><dd class="num">${d.fuzz.refusedPct}%</dd></div><div><dt>Panics</dt><dd class="num">${d.fuzz.panics}</dd></div><div><dt>Worst CU</dt><dd class="num">${n(d.fuzz.maxCu)}</dd></div></dl>
-    <p class="dim hs-try">Draft your own in the <a href="blocks.html?b=custom">Custom block</a>.</p></div>`;
-}));
+    <dl class="hs-stats"><div><dt>Bytes</dt><dd class="num">${n(d.bytes)}<small> / 1,024</small></dd></div><div><dt>Worst CU</dt><dd class="num">${n(d.cu)}<small> / 8,000</small></dd></div><div><dt>Fuzzed</dt><dd class="num">${n(d.fuzz?.trades ?? 0)}</dd></div><div><dt>Refused</dt><dd class="num">${d.fuzz?.refusedPct ?? 0}%</dd></div><div><dt>Panics</dt><dd class="num">${d.fuzz?.panics ?? 0}</dd></div><div><dt>Honeypot</dt><dd class="${hp.ok ? 'hs-pass' : 'hs-fail'}">${hp.ok ? 'Passed' : 'Failed'}</dd></div></dl>
+    <p class="dim hs-try">Edit it, test transfers against it and draft your own in the <a href="blocks.html?b=custom">Custom block</a>.</p></div>`;
+}).catch(() => { app.querySelector('#hsEx').innerHTML = ''; }));
 
 const QUOTE = { side: 'sell', wallet: { balance: 20_000_000 }, stack: PRESETS.find((p) => p.id === 'slow-bleed').slots.map(([id]) => ({ id })), progress: 0.5, minutesAgo: 600 };
 const tidy = (x) => (Math.abs(x - Math.round(x)) < 0.01 ? Math.round(x) : Math.floor(x));

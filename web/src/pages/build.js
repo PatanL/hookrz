@@ -12,6 +12,7 @@ import { headHTML, remixBarHTML, paletteHTML, rackHTML, editorHTML } from '../ui
 import { budgetHTML, pageWarnings } from '../ui/build-budget.js';
 import { simHTML, mountChart } from '../ui/build-sim.js';
 import { createLaunch } from '../ui/build-launch.js';
+import { stateFromDraft, upgradeState, wire as wireHs, refresh as refreshHs, needsCheck, STARTER } from '../ui/hs-editor.js';
 
 mountChrome('build');
 
@@ -37,8 +38,9 @@ export const S = {
   },
 };
 
-export const plain = () => S.stack.map((s) => ({ id: s.id, params: { ...s.params } }));
-export const sig = () => JSON.stringify(S.stack.map((s) => [s.id, s.params]));
+/** The stack as launched: params, plus the Custom block's Hookscript source once it compiles. */
+export const plain = () => S.stack.map((s) => ({ id: s.id, params: { ...s.params, ...(s.id === 'custom' && s.draft?.compile?.ok ? { script: s.draft.source } : {}) } }));
+export const sig = () => JSON.stringify(plain().map((s) => [s.id, s.params]));
 const selSlot = () => S.stack.find((s) => s.uid === S.sel) ?? null;
 
 // ───────────────────────── persistence ─────────────────────────
@@ -48,7 +50,7 @@ function save() {
   saveT = setTimeout(() => {
     const data = {
       v: 1, fam: S.fam, sel: S.stack.findIndex((s) => s.uid === S.sel), parent: S.parent?.ticker ?? null, seed: S.sim.seed,
-      stack: S.stack.map((s) => ({ id: s.id, params: s.params, draft: s.draft })), meta: S.launch.meta,
+      stack: S.stack.map((s) => ({ id: s.id, params: s.params, draft: s.draft ? { ...s.draft, _t: undefined } : null })), meta: S.launch.meta,
     };
     try { localStorage.setItem(KEY, JSON.stringify(data)); }
     catch { try { localStorage.setItem(KEY, JSON.stringify({ ...data, meta: { ...data.meta, image: null } })); } catch { /* storage off */ } }
@@ -148,7 +150,13 @@ function moveTo(u, to) {
 }
 function loadStack(slots, { sel = 0 } = {}) {
   snapshot();
-  S.stack = slots.slice(0, ENGINE.maxSlots).map((x) => slotOf(x.id, x.params));
+  S.stack = slots.slice(0, ENGINE.maxSlots).map((x) => {
+    const { script, ...params } = x.params ?? {};
+    const s = slotOf(x.id, params);
+    // a remixed Custom block keeps its Hookscript (re-checked below)
+    if (x.id === 'custom' && script) s.draft = { source: script, prompt: (params.prompt ?? '').trim(), compile: null, check: null };
+    return s;
+  });
   S.sel = S.stack[sel]?.uid ?? null;
   if (S.stack[0]) S.fam = byId[S.stack[0].id].family;
 }
@@ -180,6 +188,12 @@ function resetAll() {
   renderAll();
 }
 
+/** The drafter said no (honeypot request, or a rule it can't draft): why, plus rules it can draft instead. */
+function declined(d) {
+  const opts = d.alternative ? [d.alternative] : (d.suggestions ?? []);
+  const hp = d.honeypot?.ok === false;
+  return { text: hp ? (d.message ?? '') : "hookrz can't draft that rule yet. Pick a close one, or write the Hookscript yourself.", honeypot: hp, options: opts.map((o) => ({ label: o.title ?? o.prompt, text: o.prompt })) };
+}
 async function draftScript(u) {
   const s = S.stack.find((x) => x.uid === u);
   if (!s) return;
@@ -188,10 +202,17 @@ async function draftScript(u) {
   S.drafting[u] = true; delete S.draftErr[u]; renderEditor();
   try {
     const d = await api.draftHookscript(prompt);
-    s.draft = { ...d, prompt };
+    if (d.ok === false && !d.bytecodeHex) S.draftErr[u] = declined(d);
+    else s.draft = stateFromDraft(d, prompt);
   } catch (e) { S.draftErr[u] = e?.message || 'The Hookscript compiler did not answer. Try again.'; }
   delete S.drafting[u];
   changed();
+  checkHs(s);
+}
+/** Compile + fuzz + honeypot for a slot whose script hasn't been checked yet (a fresh draft from a server without the
+ *  full report, a reload, a hand-written start). */
+function checkHs(s) {
+  if (s?.id === 'custom' && needsCheck(s.draft)) refreshHs(s.uid, s.draft, (_st, info) => { if (info.checked) changed({ editor: false }); else save(); });
 }
 
 async function runSim(newCrowd = false) {
@@ -224,7 +245,8 @@ const ACT = {
   reset: (el) => { const s = S.stack.find((x) => x.uid === el.dataset.uid); if (!s) return; snapshot(); s.params = { ...defaults(s.id), ...(s.id === 'custom' ? { prompt: s.params.prompt } : {}) }; changed(); },
   parentParams: (el) => { const s = S.stack.find((x) => x.uid === el.dataset.uid); const p = S.parent?.stack.find((x) => x.id === s?.id); if (!s || !p) return; snapshot(); s.params = { ...p.params }; changed(); },
   draft: (el) => draftScript(el.dataset.uid),
-  example: (el) => { const s = selSlot(); if (!s) return; s.params.prompt = el.dataset.text; s.draft = null; renderEditor(); changed({ editor: false }); $('editor').querySelector('textarea')?.focus(); },
+  write: (el) => { const s = S.stack.find((x) => x.uid === el.dataset.uid); if (!s) return; s.draft = { source: STARTER, prompt: (s.params.prompt ?? '').trim(), compile: null, check: null }; changed(); checkHs(s); $('editor').querySelector('textarea[data-hse]')?.focus(); },
+  example: (el) => { const s = selSlot(); if (!s) return; s.params.prompt = el.dataset.text; renderEditor(); changed({ editor: false }); draftScript(s.uid); },
   leaveRemix: () => { snapshot(); S.parent = null; S.stack = []; S.sel = null; history.replaceState(null, '', location.pathname); changed(); toast('Starting from an empty rack.'); },
   sim: () => runSim(false),
   crowd: () => runSim(true),
@@ -262,12 +284,18 @@ app.addEventListener('input', (e) => {
   }
   if (p.text) {
     const st = $('editor').querySelector('.hs-stale');
-    if (st) st.hidden = !s.draft || s.draft.prompt === v.trim();
+    if (st) st.hidden = !s.draft?.prompt || s.draft.prompt === v.trim();
   }
   s.params[p.key] = v;
   const msg = $('editor').querySelector('[data-errmsg]');
   if (msg && b.error) msg.textContent = b.error(s.params, {});
   changed({ editor: false });
+});
+
+// the Hookscript editor: compile as you type, then fuzz + honeypot (the budget and the launch gate follow)
+wireHs(app, {
+  get: (u) => S.stack.find((x) => x.uid === u)?.draft ?? null,
+  onChange: (_u, _st, info) => { if (info.checked) changed({ editor: false }); else { const c = ctx(); paint($('bud'), budgetHTML(S, c)); paint($('rack'), rackHTML(S, c)); launch.stackChanged(); save(); } },
 });
 
 // keyboard: palette tabs (arrows), rack slots (arrows move focus, Shift+arrows reorder, Delete removes)
@@ -339,7 +367,7 @@ async function boot() {
   if (draft?.fam) S.fam = draft.fam;
   if (draft?.seed) S.sim.seed = draft.seed;
   const restore = () => {
-    S.stack = (draft?.stack ?? []).filter((s) => byId[s.id]).slice(0, ENGINE.maxSlots).map((s) => ({ ...slotOf(s.id, s.params), draft: s.draft ?? null }));
+    S.stack = (draft?.stack ?? []).filter((s) => byId[s.id]).slice(0, ENGINE.maxSlots).map((s) => ({ ...slotOf(s.id, s.params), draft: upgradeState(s.draft) }));
     S.sel = S.stack[draft?.sel]?.uid ?? S.stack[0]?.uid ?? null;
   };
   const parentFrom = (c) => ({ ticker: c.ticker, name: c.name, handle: c.creatorInfo?.handle ?? c.creator, stack: normalize(c.stack), image: c.image ?? null, coin: c });
@@ -370,6 +398,7 @@ async function boot() {
   if (params.has('preset') || params.has('add')) { params.delete('preset'); params.delete('add'); history.replaceState(null, '', location.pathname + (params.toString() ? `?${params}` : '') + location.hash); }
 
   renderAll();
+  for (const s of S.stack) checkHs(s); // a restored Hookscript is compiled and checked again
   save();
   if (location.hash) {
     const t = document.getElementById(location.hash.slice(1));

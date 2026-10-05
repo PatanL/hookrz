@@ -8,6 +8,7 @@ import { byId, ENGINE, rentSol, defaults } from '../data/blocks.js';
 const NEEDS = {
   'circuit-breaker': ['pool'], 'lock-in': ['pool'], 'chapters': ['pool'],
   'blocklist': ['blockSrc', 'blockDst'], 'token-gate': ['gateMint', 'gateAta'], 'allowlist-phase': ['passDst'],
+  'custom': ['pool', 'script'],
 };
 const ACCOUNT_LABEL = {
   stack: 'Stack PDA ["stack", mint]', pool: 'Meteora DBC pool (read-only price + progress)',
@@ -15,6 +16,7 @@ const ACCOUNT_LABEL = {
   blockSrc: 'Block marker of sender ["block", mint, owner]', blockDst: 'Block marker of receiver ["block", mint, owner]',
   gateMint: 'Gate token mint', gateAta: 'Receiver\'s gate-token account (ATA derived from destination owner)',
   passDst: 'Allowlist pass of receiver ["pass", mint, owner]',
+  script: 'Hookscript account ["script", mint]: bytecode + the coin\'s script state',
 };
 
 /** stack: [{ id, params }] -> normalized slots with defaults filled in */

@@ -445,3 +445,11 @@
   .fees-table td.note { grid-column: 1 / -1; }
   .fees-table tfoot tr { border-bottom: 0; }
 }
+.hs-stats .hs-pass { color: var(--up); }
+.hs-stats .hs-fail { color: var(--refuse); }
+@media (max-width: 560px) {
+  .dc-hstable tr { display: block; padding: 10px 14px; }
+  .dc-hstable tr + tr { border-top: 1px solid var(--line); }
+  .dc-hstable td { display: block; padding: 0 !important; border: 0 !important; }
+  .dc-hstable td:first-child { white-space: normal; overflow-wrap: anywhere; margin-bottom: 3px; }
+}

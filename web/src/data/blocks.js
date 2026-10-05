@@ -35,7 +35,8 @@ export const ENGINE = {
   cuBase: 4200,          // dispatch, account checks, transfer classification
   maxExtraAccounts: 10,  // ExtraAccountMetaList entries beyond the Stack PDA
   stackBytes: 640,
-  walletRecordBytes: 96,
+  walletRecordBytes: 328,
+  scriptBytes: 1296,
   rentPerByteYear: 6960, // lamports per byte incl. 128-byte header (rent-exempt minimum)
 };
 export const rentSol = (bytes) => ((bytes + 128) * ENGINE.rentPerByteYear) / 1e9;
@@ -331,9 +332,11 @@ export const BLOCKS = [
 
   // ───────────── CUSTOM ─────────────
   {
-    id: 'custom', code: 0x17f0, family: 'custom', name: 'Custom Block', enforcedBy: 'hook', state: 'wallet', route: 'record', cu: 5000, accts: 2, unreviewed: true,
+    // cu: the engine's marginal cost for King of the Hill, measured on the local fork with the real DBC binary;
+    // cuRange: an empty script (pool + wallet records + VM) up to the heaviest script that compiles (programs/hookrz-engine/STATUS.md)
+    id: 'custom', code: 0x17f0, family: 'custom', name: 'Custom Block', enforcedBy: 'hook', state: 'wallet', route: 'record', cu: 4900, cuRange: [4200, 14600], accts: 4, unreviewed: true,
     tagline: 'Say the rule in English. hookrz drafts it in Hookscript.',
-    refuses: 'Whatever your Hookscript says. Hookscript is a small rule language the engine runs inside its own budget: comparisons over amount, balances, time, price and wallet counters. It has no loops and no calls out, and it can only refuse. Each draft is fuzzed against 10,000 generated trades before you can launch it.',
+    refuses: 'Whatever your Hookscript says. Hookscript is a small rule language the engine runs inside its own budget. It reads the transfer, both wallets, the clock and the curve, and it can keep its own state: coin-wide globals and a few bytes per wallet, enough for games like King of the Hill. It has no loops and no calls out, and it can only refuse. Scripts are at most 1,024 bytes and 8,000 CU. Each one is fuzzed against 10,000 generated trades and honeypot-checked before you can launch it.',
     params: [{ key: 'prompt', label: 'Your rule', text: true, def: 'No single sell over a quarter of your bag in your first 2h' }],
     summary: () => 'Hookscript',
     error: () => 'Refused by the coin\'s custom rule',

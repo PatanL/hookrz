@@ -4,6 +4,7 @@ import { ENFORCERS, ENGINE, byId, rentSol } from '../data/blocks.js';
 import { FEES } from '../api/contract.js';
 import { cube } from './icons.js';
 import { esc } from '../core/format.js';
+import { launchProblem } from './hs-editor.js';
 
 /** Launch blockers the engine's budget() doesn't know about (page-level). */
 export function pageWarnings(S) {
@@ -11,9 +12,8 @@ export function pageWarnings(S) {
   if (!S.stack.length) out.push({ level: 'need', text: 'Add at least one block. hookrz coins launch with a stack.' });
   for (const s of S.stack) {
     if (s.id !== 'custom') continue;
-    const prompt = (s.params.prompt ?? '').trim();
-    if (!s.draft) out.push({ level: 'error', id: s.id, text: 'Custom Block: draft its Hookscript before you launch.' });
-    else if (s.draft.prompt !== prompt) out.push({ level: 'error', id: s.id, text: 'Custom Block: the rule changed since the last draft. Draft it again.' });
+    const p = launchProblem(s.draft);
+    if (p) out.push({ ...p, id: s.id });
   }
   return out;
 }

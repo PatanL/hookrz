@@ -3,6 +3,9 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { Keypair } from "@solana/web3.js";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { ROOT } from "../src/env.js";
 import { boot } from "../src/boot.js";
 import { buildApp } from "../src/app.js";
 import { signB64, type Hookrz } from "../src/service.js";
@@ -147,6 +150,21 @@ test("hookscript draft, and a Custom block launched from its English prompt alon
   const coin = (await get("/v1/coins/DRAFT")).body;
   assert.ok(coin.script?.source?.includes("rule"), "the drafted source is stored with the coin");
   console.log(`draft ${draftMs} ms, provider ${d.body.provider}, ${d.body.bytes} B, fuzz refused ${d.body.fuzz.refusedPct}%`);
+});
+
+test("a hand-written script in the Custom slot is recompiled and must pass the honeypot check", async () => {
+  const who = Keypair.generate();
+  await post("/v1/fork/airdrop", { wallet: who.publicKey.toBase58(), sol: 10 });
+  const trap = readFileSync(resolve(ROOT, "hookscript/fuzz/honeypots/no-sells.hs"), "utf8");
+  const bad = await post("/v1/launch/prepare", { meta: { name: "Trap", ticker: "TRAP" }, stack: [{ id: "custom", params: { prompt: "x", script: trap } }], creator: who.publicKey.toBase58() });
+  assert.equal(bad.status, 422);
+  assert.equal(bad.body.error, "SCRIPT_UNSAFE");
+  const koth = readFileSync(resolve(ROOT, "hookscript/examples/king-of-the-hill.hs"), "utf8");
+  const good = await post("/v1/launch/prepare", { meta: { name: "Crown", ticker: "CROWN" }, stack: [{ id: "custom", params: { prompt: "King of the Hill", script: koth } }], creator: who.publicKey.toBase58(), script: { source: koth, bytecode: "AAAA" } });
+  assert.equal(good.status, 200, JSON.stringify(good.body).slice(0, 300));
+  const sub = await post("/v1/launch/submit", { mint: good.body.mint, signed: good.body.transactions.map((t: any) => signB64(t.base64, who)) });
+  assert.equal(sub.status, 200, JSON.stringify(sub.body));
+  assert.ok((await get("/v1/coins/CROWN")).body.script?.source?.includes("King of the Hill"));
 });
 
 test("validate, simulate, creator, health, blocks", async () => {

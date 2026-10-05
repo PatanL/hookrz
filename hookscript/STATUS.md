@@ -28,7 +28,7 @@ _Updated 2026-10-04. Owner: HOOKSCRIPT agent. Spec: [SPEC.md](SPEC.md)._
 | `compiler/` (TS, Node ≥ 22.6, zero deps) | Parser, then typed checker (units: time vs duration errors, inferred globals and wallet vars), then codegen with short-circuit jumps and constant folding, then a verified header. Errors give line, column and a hint. Also a reference interpreter (`interp.ts`) that matches the Rust VM bit for bit, the Ctx codec, a disassembler and the CLI `hsc` |
 | `examples/` | 22 scripts, all compiled, fuzzed and honeypot-checked (table below) |
 | `fuzz/` | Seeded launch world reusing the site simulator's archetypes. 10,000 transfers per script with retries, every Ctx also run through the Rust VM. Honeypot check: per-holder 60-day exit simulation with nobody else trading, plus a bank run (everyone exits in turn) |
-| `drafter/` | `draft(prompt)`: Claude (Anthropic SDK, optional dependency) when `ANTHROPIC_API_KEY` is set, otherwise offline templates (26 rule families). Every draft is compiled, fuzzed and honeypot-checked, and failures are fed back to the model with compiler or checker output (up to 3 attempts) |
+| `drafter/` | `draft(prompt)`: Claude (Anthropic SDK, optional dependency) when `ANTHROPIC_API_KEY` is set, otherwise offline templates (27 rule families). Every draft is compiled, fuzzed and honeypot-checked, and failures are fed back to the model with compiler or checker output (up to 3 attempts). The offline drafter answers only on a confident match: the prompt must be about trading and hit a template's anchor phrase or enough of its cues. The rule title is always the template's own; the user's sentence is kept only as `prompt`. Otherwise it returns `ok:false` with no script, a message, and `suggestions` (the closest rules it can draft). Honeypot intent ("nobody can ever sell", "sells blocked forever", "go up only", "lock everyone in", …) is refused up front for every provider: `ok:false`, `honeypot:{ok:false, notes:[reason]}`, and an `alternative` time-boxed lock-in |
 
 ## Commands (run from `hookscript/`)
 `npm test` runs the compiler tests, parity, the fuzz of every example and the drafter mock test. `npm run test:vm`,
@@ -40,7 +40,7 @@ node compiler/test/parity.ts --cases 1000                          # Rust VM vs 
 node fuzz/run.ts --json fuzz/report.json examples/*.hs             # 10,000 trades each + honeypot
 node fuzz/run.ts --trades 3000 fuzz/honeypots/*.hs                 # the 6 planted honeypots (all must be FLAGGED)
 node drafter/cli.ts "Every 100th buy wins the jackpot"             # draft (Claude if ANTHROPIC_API_KEY, else offline)
-node drafter/test.ts                                               # 27 English prompts through the offline drafter
+node drafter/test.ts                                               # 29 rule prompts, 15 honeypot-intent and 24 off-topic prompts through the offline drafter
 node drafter/test-mock.ts                                          # Claude provider path with a mock client
 node compiler/test/compiler.test.ts                                # 59 tests: error messages, semantics, sun/moon accuracy, 3,000 mutated sources never throw
 (cd vm && cargo test --release)                                    # VM host tests + fuzz (FUZZ_ITERS=3000000 for long)

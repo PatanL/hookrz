@@ -92,7 +92,7 @@ export function fuzz(code: Uint8Array, opts: FuzzOptions = {}): { fuzz: FuzzRepo
   const lines: string[] = [];
   const keepLines = opts.rust === true || (opts.rust !== false && existsSync(RUNNER));
   let gasSum = 0;
-  let sellAttempts = 0, sellRefused = 0;
+  let sellAttempts = 0, sellRefused = 0, exits = 0;
   const record = (o: Outcome) => {
     rep.trades++;
     const k = (rep.byKind[o.kind] ??= { attempts: 0, refused: 0 });
@@ -165,6 +165,7 @@ export function fuzz(code: Uint8Array, opts: FuzzOptions = {}): { fuzz: FuzzRepo
         hp.checkedWallets++;
         const ex = exitSim(w, code, x.id, end);
         hp.maxExitHours = Math.max(hp.maxExitHours, ex.left <= x.balance / 100n ? ex.hours : 0);
+        if (ex.left <= x.balance / 100n) exits++;
         if (ex.left > x.balance / 100n && hp.locked.length < 8) {
           hp.ok = false;
           hp.locked.push({ wallet: `#${x.id}`, type: x.type, startTokens: Number(x.balance / UNIT), leftTokens: Number(ex.left / UNIT), tries: ex.tries, lastMessage: ex.msg });
@@ -174,7 +175,12 @@ export function fuzz(code: Uint8Array, opts: FuzzOptions = {}): { fuzz: FuzzRepo
   }
   rep.refusedPct = rep.trades ? Math.round((rep.refused / rep.trades) * 1000) / 10 : 0;
   rep.avgCu = rep.trades ? Math.round(gasSum / rep.trades) : 0;
-  if (sellAttempts > 20 && sellRefused === sellAttempts) { hp.allSellsRefused = true; hp.ok = false; hp.notes.push('Every sell in the fuzz run was refused.'); }
+  if (sellAttempts > 20 && sellRefused === sellAttempts) {
+    hp.allSellsRefused = true;
+    // a time-boxed lock-in can refuse every sell inside short fuzz windows; it's a honeypot only if no holder could exit later either
+    if (exits === 0) { hp.ok = false; hp.notes.push('Every sell in the fuzz run was refused, and no holder could exit later either.'); }
+    else hp.notes.push(`Every sell inside the fuzzed launch windows was refused, but every checked holder could exit later (the slowest after ${hp.maxExitHours.toFixed(1)}h).`);
+  }
   const b = rep.byKind.buy;
   if (b && b.attempts > 20 && b.refused === b.attempts) hp.notes.push('Every buy in the fuzz run was refused: nobody can get in.');
   if (hp.bankRun) hp.notes.push(`Bank run: when holders exit one after another, holder ${hp.bankRun.failedAt} (${hp.bankRun.type}) gets stuck: "${hp.bankRun.lastMessage}"`);

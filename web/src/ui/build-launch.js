@@ -204,7 +204,7 @@ export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft
       `creator: ${creator}`,
       ...(S.parent ? [`parent: $${S.parent.ticker} (stack by @${S.parent.handle})`] : ['parent: none (original stack)']),
       'stack:',
-      ...st.map((s, i) => `  ${i + 1}. ${s.id} ${JSON.stringify(s.id === 'custom' ? { prompt: s.params.prompt, hookscript: S.stack[i]?.draft ? `${S.stack[i].draft.ops} ops` : null } : s.params)}`),
+      ...st.map((s, i) => `  ${i + 1}. ${s.id} ${JSON.stringify(s.id === 'custom' ? { prompt: s.params.prompt, hookscript: S.stack[i]?.draft?.compile?.ok ? `${S.stack[i].draft.compile.name ?? 'rule'}: ${S.stack[i].draft.compile.size} bytes, ${S.stack[i].draft.compile.cu} CU worst case` : null } : s.params)}`),
       ...(m.buy && +m.buy ? [`creator buy: ${+m.buy} SOL`] : []),
       ...(L.prep?.mint ? [`mint: ${L.prep.mint}`] : []),
       `issued: ${when}`,

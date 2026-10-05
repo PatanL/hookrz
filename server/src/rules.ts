@@ -97,12 +97,13 @@ export async function hookscript(): Promise<any | null> {
   const interp = index?.run ? index : await load("compiler/src/interp.ts");
   const math = await load("compiler/src/math.ts");
   const compiler = index?.compile ? index : ((await load("compiler/src/compile.ts")) ?? (await load("compiler/src/compiler.ts")));
+  const fuzzer = await load("fuzz/fuzz.ts");
   const drafter = (await load("drafter/index.ts")) ?? (await load("drafter/src/index.ts")) ?? (await load("drafter/draft.ts")) ?? (await load("drafter/drafter.ts"));
   if (!interp?.run) { hs = null; return null; }
   hs = {
     run: interp.run, formatReason: interp.formatReason ?? index?.formatReason, verify: interp.verify,
     priceE6FromSqrtQ64: math?.priceE6FromSqrtQ64 ?? index?.priceE6FromSqrtQ64,
-    compile: compiler?.compile ?? null, draft: drafter?.draft ?? drafter?.draftHookscript ?? null,
+    compile: compiler?.compile ?? null, draft: drafter?.draft ?? drafter?.draftHookscript ?? null, fuzz: fuzzer?.fuzz ?? null,
   };
   return hs;
 }

@@ -10,7 +10,7 @@ import { api } from '../api/client.js';
 import { esc } from '../core/format.js';
 import { toast } from './chrome.js';
 import { CHECKS, STATE_LABEL, STATE_LONG, enfBadges, routeChip, paramRange, paramValue, flagsHtml } from './blocks-card.js';
-import { tintHookscript } from './docs-hookscript.js';
+import { editorHTML as hsEditorHTML, stateFromDraft, refresh as refreshHs, wire as wireHs, needsCheck, testerHTML, mountTester, EXAMPLES } from './hs-editor.js';
 
 // ───────── formatting ─────────
 export const dur = (s) => {
@@ -267,26 +267,53 @@ function diamondPanel(b) {
 }
 
 function customPanel() {
-  let seq = 0;
+  const KEY = 'bd-custom';
+  let st = null, seq = 0, tester = null, wired = false;
   return {
-    html: () => `<div class="bd-hs"><button class="btn btn-chrome btn-sm" data-act="draft">Draft in Hookscript</button>
-      <div class="bd-hsout" data-o="hs" aria-live="polite"></div>
-      <p class="bd-note">Hookscript can read the transfer, the wallet, the clock and the curve, and it can only refuse. No loops, no calls out, at most 8,000 CU. Every draft is fuzzed against 10,000 trades before it can launch.</p></div>`,
-    mount(el, get) { el.querySelector('[data-act="draft"]').onclick = () => this.draft(el, get()); this.draft(el, get()); },
-    async draft(el, P) {
+    html: () => `<div class="bd-hs">
+      <div class="bd-hsgo"><button class="btn btn-chrome btn-sm" data-act="draft">Draft from your rule</button>
+        <span class="bd-hsex"><span class="dim">or try</span>${EXAMPLES.map((x) => `<button type="button" class="bd-chip" data-ex="${esc(x.text)}" title="${esc(x.text)}">${esc(x.label)}</button>`).join('')}</span></div>
+      <div data-o="hs" aria-live="polite"></div>
+      <div class="bd-hstest" data-o="testbox" hidden><h4 class="bd-h4">Test transfers</h4>
+        <p class="bd-sub">Runs each transfer through the Hookscript interpreter the engine matches bit for bit. The script's state carries over, so a crown taken by one buy is still there on the next sell.</p>
+        <div data-o="tester"></div></div>
+      <p class="bd-note">Hookscript reads the transfer, both wallets, the clock, the curve and its own state, and it can only refuse. No loops, no calls out. At most 1,024 bytes and 8,000 CU worst case, or it doesn't compile. Every draft is fuzzed against 10,000 generated trades and honeypot-checked before it can launch.</p></div>`,
+    mount(el, get) {
+      el.querySelector('[data-act="draft"]').onclick = () => this.draft(el, get().prompt);
+      el.querySelectorAll('[data-ex]').forEach((b) => b.addEventListener('click', () => {
+        const ta = el.closest('.bd')?.querySelector('#p-prompt');
+        if (ta) { ta.value = b.dataset.ex; ta.dispatchEvent(new Event('input', { bubbles: true })); }
+        this.draft(el, b.dataset.ex);
+      }));
+      if (!wired) { wired = true; wireHs(el, { get: () => st, onChange: () => tester?.sourceChanged() }); }
+      this.draft(el, get().prompt);
+    },
+    async draft(el, prompt) {
       const my = ++seq, out = el.querySelector('[data-o="hs"]');
-      out.innerHTML = `<div class="bd-hsload"><span></span><span></span><span></span><em>Drafting and fuzzing…</em></div>`;
-      const d = await api.draftHookscript(P.prompt || 'No single sell over a quarter of your bag in your first 2h');
+      const text = (prompt || EXAMPLES[0].text).trim();
+      out.innerHTML = `<div class="bd-hsload"><span></span><span></span><span></span><em>Drafting, fuzzing and checking for honeypots…</em></div>`;
+      let d;
+      try { d = await api.draftHookscript(text); } catch (e) { if (my === seq) out.innerHTML = `<p class="bd-hserr">${esc(e?.message ?? 'The drafter did not answer. Try again.')}</p>`; return; }
       if (my !== seq || !out.isConnected) return;
-      out.innerHTML = `<pre class="hs-code"><code>${tintHookscript(d.script)}</code></pre>
-        <div class="bd-hsstats">
-          <div><span>Ops</span><b class="num">${d.ops}</b></div>
-          <div><span>CU</span><b class="num">${d.cu.toLocaleString('en-US')}</b><small>of 8,000</small></div>
-          <div><span>Fuzzed</span><b class="num">${d.fuzz.trades.toLocaleString('en-US')}</b><small>trades</small></div>
-          <div><span>Refused</span><b class="num">${d.fuzz.refusedPct}%</b></div>
-          <div><span>Panics</span><b class="num">${d.fuzz.panics}</b></div>
-          <div><span>Worst CU</span><b class="num">${d.fuzz.maxCu.toLocaleString('en-US')}</b></div>
-        </div>`;
+      if (d.ok === false && !d.bytecodeHex) {
+        // the drafter said no: a honeypot request or a rule it can't draft. Explain and offer what it can draft.
+        const opts = d.alternative ? [d.alternative] : (d.suggestions ?? []);
+        const hp = d.honeypot?.ok === false;
+        out.innerHTML = `<div class="bd-declined${hp ? ' hp' : ''}"><p><b>${hp ? 'Not allowed: holders must always be able to sell eventually.' : 'Not drafted.'}</b> ${esc(hp ? (d.message ?? '') : "hookrz can't draft that rule yet. Pick a close one, or write the Hookscript yourself.")}</p>
+          ${opts.length ? `<div class="bd-declined-opts"><span class="dim">${hp ? 'Safe version' : 'Closest rules'}</span>${opts.map((o, k) => `<button class="btn btn-glass btn-sm" type="button" data-redraft="${k}">${esc(o.title ?? o.prompt)}</button>`).join('')}</div>` : ''}</div>`;
+        out.querySelectorAll('[data-redraft]').forEach((b) => { b.onclick = () => this.draft(el, opts[+b.dataset.redraft].prompt); });
+        return;
+      }
+      st = stateFromDraft(d, text);
+      out.innerHTML = hsEditorHTML(st, KEY, { rows: 8 });
+      if (needsCheck(st)) refreshHs(KEY, st, () => tester?.sourceChanged());
+      const box = el.querySelector('[data-o="testbox"]');
+      box.hidden = false;
+      if (!tester) {
+        const t = el.querySelector('[data-o="tester"]');
+        t.innerHTML = testerHTML();
+        tester = await mountTester(t, () => st?.source ?? '');
+      } else tester.sourceChanged();
     },
     update() {},
   };
@@ -310,7 +337,7 @@ function explainer(b) {
     case 'leftover-burn': return { title: 'What happens at graduation', panel: leftoverPanel() };
     case 'lp-lock': return { title: 'The graduation position', panel: lpPanel() };
     case 'diamond-tiers': return { title: 'Who wears a crown', panel: diamondPanel(b) };
-    case 'custom': return { title: 'Draft it', panel: customPanel() };
+    case 'custom': return { title: 'Write it in Hookscript', panel: customPanel() };
     case 'locked-metadata': return { title: 'What the mint says', panel: staticPanel([
       ['Metadata update authority', 'none'], ['Set in', 'create mint (launch instruction 1)'], ['Name, ticker, image, URI', 'final'],
     ], 'Nothing is refused. Token-2022 keeps the metadata on the mint itself, and with no update authority nobody can change it again, hookrz included.') };
@@ -345,7 +372,7 @@ export function openDetail(id, { opener } = {}) {
       <dl class="bd-spec">
         <div class="wide"><dt>Enforced by</dt><dd>${[b.enforcedBy, b.also].filter(Boolean).map((e) => `<span class="enf ${e}"><i></i>${ENFORCERS[e].name}</span> <span class="muted">${esc(ENFORCERS[e].long)}</span>`).join('<br>')}</dd></div>
         <div><dt>Checks</dt><dd>${CHECKS[id] ? CHECKS[id].map((x) => x + 's').join(' · ') : b.id === 'custom' ? 'what your rule says' : 'no transfers'}</dd></div>
-        <div><dt>CU per transfer</dt><dd class="num">${b.cu ? b.cu.toLocaleString('en-US') : '0'}</dd></div>
+        <div><dt>CU per transfer</dt><dd class="num">${b.cuRange ? `${b.cuRange[0].toLocaleString('en-US')}–${b.cuRange[1].toLocaleString('en-US')}` : b.cu ? b.cu.toLocaleString('en-US') : '0'}</dd></div>
         <div><dt>Extra accounts</dt><dd class="num">+${b.accts}</dd></div>
         <div><dt>Error code</dt><dd class="num">${hex(b.code)}${b.code != null ? ` <span class="dim">${errName(b.code)}</span>` : ''}</dd></div>
         <div class="wide"><dt>State</dt><dd>${STATE_LABEL[b.state]} <span class="muted">${esc(STATE_LONG[b.state])}</span></dd></div>

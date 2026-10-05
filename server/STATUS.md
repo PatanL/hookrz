@@ -50,6 +50,9 @@ The quote token is native SOL.
   - `script.source`, compiled with HOOKSCRIPT's `compile()`;
   - only the block's English `prompt`, as the site sends it, which goes through HOOKSCRIPT's `draft()`. Every draft is
     compiled, fuzzed over 10,000 trades and honeypot-checked. Drafts are cached per prompt.
+  - The site sends the edited source in the Custom slot's `params.script` (and as `script.source`). The server never
+    trusts client bytecode: it recompiles, fuzzes 10,000 trades and runs the honeypot check, and a failure is
+    `422 SCRIPT_UNSAFE` (tested with `hookscript/fuzz/honeypots/no-sells.hs`).
 - The ExtraAccountMetaList the creator buy resolves offline matches LAYOUT.md:
   - the Stack is writable for anti-bundle, circuit-breaker and creator-vest;
   - the pool is included for the breaker, lock-in and custom;
@@ -161,7 +164,7 @@ real DBC → Token-2022 → engine CPI chain. ENGINE's own table (worst case 19,
 
 Opening a Wallet record inside a buy (`open_wallet`, top level) costs about 4,700 CU on top.
 
-`npm test` also runs `tests/api.test.ts` (6 pass). It covers:
+`npm test` also runs `tests/api.test.ts` (7 pass). It covers:
 - a launch over HTTP, with the mint stable from preview to wallet;
 - resuming a half-landed launch;
 - a remix: parent author on chain, lineage, stacks;
@@ -169,6 +172,7 @@ Opening a Wallet record inside a buy (`open_wallet`, top level) costs about 4,70
 - a refusal indexed as `by: snipe-shield`;
 - `/v1/hookscript/draft` (heuristic provider, fuzz panics 0);
 - a Custom block launched from its English prompt alone;
+- a hand-written honeypot script refused at prepare, and King of the Hill launched from source;
 - reads, validate, simulate, the event stream.
 
 ### Browser check (live mode, stub wallet): passed

@@ -5,6 +5,7 @@ import { cube, ICON } from './icons.js';
 import { voxelSVG, asset } from './voxel.js';
 import { avatar } from './avatar.js';
 import { esc } from '../core/format.js';
+import { editorHTML as hsEditorHTML, EXAMPLES } from './hs-editor.js';
 
 const pad2 = (i) => String(i).padStart(2, '0');
 const CHEV = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7.5 2.5 4 6l3.5 3.5"/></svg>';
@@ -166,11 +167,6 @@ export function rackHTML(S, c) {
 }
 
 // ───────────────────────── editor ─────────────────────────
-const EXAMPLES = [
-  'No single sell over a quarter of your bag in your first 2h',
-  'No buys after a 30% pump in 10 minutes',
-  'The curve is closed on weekends',
-];
 
 export function editorHTML(S, c) {
   const i = S.stack.findIndex((s) => s.uid === S.sel);
@@ -240,41 +236,24 @@ function paramHTML(s, p, parent) {
 
 // ───────────────────────── custom block: English → Hookscript ─────────────────────────
 function customHTML(S, s) {
-  const busy = S.drafting[s.uid], err = S.draftErr[s.uid], d = s.draft;
-  const stale = d && d.prompt !== (s.params.prompt ?? '').trim();
+  const busy = S.drafting[s.uid], err = S.draftErr[s.uid], st = s.draft;
+  const stale = st && st.prompt && st.prompt !== (s.params.prompt ?? '').trim();
   return `<div class="hs">
     <div class="ed-sub pixel">Your rule, in English</div>
     <textarea class="input hs-in" id="hs-${s.uid}" rows="3" maxlength="280" data-p="prompt" data-uid="${s.uid}" data-fk="hs-prompt" aria-label="Describe your rule in English">${esc(s.params.prompt ?? '')}</textarea>
-    <div class="hs-ex"><span class="dim">Try</span>${EXAMPLES.map((t, k) => `<button class="hs-chip" data-act="example" data-text="${esc(t)}" data-fk="ex-${k}">${esc(t)}</button>`).join('')}</div>
+    <div class="hs-ex"><span class="dim">Try</span>${EXAMPLES.map((x, k) => `<button class="hs-chip" data-act="example" data-text="${esc(x.text)}" data-fk="ex-${k}" title="${esc(x.text)}">${esc(x.label)}</button>`).join('')}</div>
     <div class="hs-go">
-      <button class="btn btn-chrome btn-sm" data-act="draft" data-uid="${s.uid}" data-fk="hs-draft" ${busy ? 'disabled' : ''}>${busy ? '<span class="spin" aria-hidden="true"></span>Compiling and fuzzing…' : d ? 'Draft again' : 'Draft Hookscript'}</button>
-      <span class="hs-stale chip warnc" ${stale ? '' : 'hidden'}>Rule changed since this draft</span>
+      <button class="btn btn-chrome btn-sm" data-act="draft" data-uid="${s.uid}" data-fk="hs-draft" ${busy ? 'disabled' : ''}>${busy ? '<span class="spin" aria-hidden="true"></span>Drafting, fuzzing, checking…' : st ? 'Draft again' : 'Draft Hookscript'}</button>
+      ${st ? '' : `<button class="btn btn-ghost btn-sm" data-act="write" data-uid="${s.uid}" data-fk="hs-write">Write it myself</button>`}
+      <span class="hs-stale chip warnc" ${stale ? '' : 'hidden'} title="The Hookscript below is what launches">Rule text changed since this draft</span>
     </div>
-    ${err ? `<p class="hs-err" role="alert">${esc(err)}</p>` : ''}
-    ${busy && !d ? `<div class="hs-out hs-skel" aria-hidden="true"><i></i><i></i><i></i><i></i></div>` : ''}
-    ${d ? `<div class="hs-out${busy ? ' busy' : ''}">
-      <div class="hs-bar"><span class="pixel">Hookscript</span><span class="chip warnc" title="No reviewer has signed off on this Hookscript yet">Unreviewed</span><span class="hs-ops mono">${d.ops} ops · ${d.cu.toLocaleString('en-US')} CU</span></div>
-      <pre class="hs-code"><code>${tint(d.script)}</code></pre>
-      <div class="hs-fuzz">
-        <div><span>Fuzzed</span><b class="mono">${d.fuzz.trades.toLocaleString('en-US')} trades</b></div>
-        <div><span>Refused</span><b class="mono">${d.fuzz.refusedPct.toFixed(1)}%</b></div>
-        <div><span>Panics</span><b class="mono ${d.fuzz.panics ? 'bad' : 'good'}">${d.fuzz.panics}</b></div>
-        <div><span>Max CU</span><b class="mono">${d.fuzz.maxCu.toLocaleString('en-US')}</b></div>
-      </div>
-      <p class="hs-note">Compiled to engine ops inside the 5,000 CU custom-block budget. The coin page shows the Unreviewed badge until a hookrz reviewer signs off on this Hookscript.</p>
-    </div>` : ''}
+    ${err ? (typeof err === 'string' ? `<p class="hs-err" role="alert">${esc(err)}</p>`
+      : `<div class="hs-declined${err.honeypot ? ' hp' : ''}" role="alert"><p><b>${err.honeypot ? 'Not allowed: holders must always be able to sell eventually.' : 'Not drafted.'}</b> ${esc(err.text)}</p>
+        ${err.options.length ? `<div class="hs-ex"><span class="dim">${err.honeypot ? 'Safe version' : 'Closest rules'}</span>${err.options.map((o, k) => `<button class="hs-chip" data-act="example" data-text="${esc(o.text)}" data-fk="alt-${k}" title="${esc(o.text)}">${esc(o.label)}</button>`).join('')}</div>` : ''}
+        ${err.honeypot ? '<p class="dim">Or write it in Hookscript yourself.</p>' : ''}</div>`) : ''}
+    ${busy && !st ? `<div class="hs-out hs-skel" aria-hidden="true"><i></i><i></i><i></i><i></i></div>` : ''}
+    ${st ? `<div class="${busy ? 'hs-busy' : ''}">${hsEditorHTML(st, s.uid)}</div>
+      <p class="hs-note-2">Edit the Hookscript directly: it compiles as you type, then it's fuzzed against generated trades and checked for honeypots. It launches only if every holder can always sell eventually. The coin page shows the Unreviewed badge until a hookrz reviewer signs off.</p>` : ''}
   </div>`;
 }
 
-/** Light syntax tint for Hookscript: keywords, strings, numbers, dotted fields, operators. */
-export function tint(src) {
-  const re = /("[^"\n]*")|\b(rule|when|let|refuse|if|because|and|or|not|in)\b|\b(\d+(?:\.\d+)?[hms%]?)\b|\b([a-z_]+(?:\.[a-z_]+)+)\b|(==|!=|>=|<=|>|<|\+|\*|\/|-)/g;
-  let out = '', last = 0;
-  for (const m of src.matchAll(re)) {
-    out += esc(src.slice(last, m.index));
-    const [t, str, kw, num, field, op] = m;
-    out += str ? `<span class="t-s">${esc(t)}</span>` : kw ? `<span class="t-k">${t}</span>` : num ? `<span class="t-n">${t}</span>` : field ? `<span class="t-f">${t}</span>` : op ? `<span class="t-o">${esc(t)}</span>` : esc(t);
-    last = m.index + t.length;
-  }
-  return out + esc(src.slice(last));
-}

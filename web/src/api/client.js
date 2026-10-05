@@ -168,14 +168,33 @@ export const api = {
     return node(root.ticker);
   },
 
+  /**
+   * English → Hookscript. Every draft is compiled, fuzzed against generated trades and honeypot-checked before it comes
+   * back: { ok, prompt, script, bytecodeHex, bytes, ops, cu, fuzz{trades, refusedPct, panics, errors, maxCu, avgCu, …},
+   * honeypot{ok, notes, …}, warnings, errors, abi, provider, template, reviewed:false }.
+   * Live: the server's drafter (Claude when it has an API key, else the offline drafter). Otherwise: the same offline
+   * drafter, in a worker on this page.
+   */
   async draftHookscript(prompt) {
     if (MODE === 'live') return live('/v1/hookscript/draft', { prompt });
-    await wait(900);
-    return draftDemo(prompt);
+    const hs = await import('../hookscript/hs.js');
+    return hs.draftOffline(prompt);
+  },
+
+  /** Compile Hookscript source on this page: { ok, size, ops, cu, hex, abi, warnings } or { ok:false, errors[{line, col, message, hint}] }. */
+  async compileHookscript(source) {
+    const hs = await import('../hookscript/hs.js');
+    return hs.compileSource(source);
+  },
+
+  /** Compile + fuzz + honeypot check (the checks a script must pass to launch): { source, compile, check }. */
+  async checkHookscript(source) {
+    const hs = await import('../hookscript/hs.js');
+    return hs.checkSource(source);
   },
 
   async prepareLaunch({ meta, stack, curve = {}, creator = 'DEMO', parent = null, mint = null }) {
-    if (MODE === 'live') return live('/v1/launch/prepare', { meta, stack, curve, creator: creator === 'DEMO' ? null : creator, parent, mint });
+    if (MODE === 'live') return live('/v1/launch/prepare', { meta, stack, curve, creator: creator === 'DEMO' ? null : creator, parent, mint, script: scriptOf(stack) });
     await wait(500);
     const b = budget(stack);
     const ixs = LAUNCH_IXS.filter((x, i) => b.hasHook || i !== 3).map((x) => ({ ...x }));
@@ -190,7 +209,7 @@ export const api = {
       // Rebuild for the connected wallet (same mint, fresh blockhash, parent stack attached), then the wallet
       // signs and sends each transaction in order; the server confirms and indexes the coin.
       const { h, address } = await walletHandle();
-      const P = await live('/v1/launch/prepare', { meta, stack, creator: address, parent, mint: prepared?.mint ?? null });
+      const P = await live('/v1/launch/prepare', { meta, stack, creator: address, parent, mint: prepared?.mint ?? null, script: scriptOf(stack) });
       const signatures = [];
       for (const t of P.transactions) {
         const { sig, rec } = await signSendWait(h, t.base64);
@@ -274,23 +293,8 @@ export function diffStacks(a, b) {
   return { added, removed, tuned };
 }
 
-function draftDemo(prompt) {
-  const p = prompt.toLowerCase();
-  const n = (p.match(/(\d+(?:\.\d+)?)/) ?? [])[1] ?? '1';
-  let script, ops, cu, refusalsPct;
-  if (p.includes('bought') || p.includes('more than they')) {
-    script = `rule "sell no more than you bought this hour"\nwhen transfer.kind == sell\nlet bought = wallet.received(window: ${n}h)\nrefuse if transfer.amount > bought\n  because "You can sell at most what you bought in the last ${n}h"`;
-    ops = 9; cu = 3400; refusalsPct = 6.1;
-  } else if (p.includes('weekend') || p.includes('saturday') || p.includes('sunday')) {
-    script = `rule "closed on weekends"\nwhen transfer.kind in [buy, sell]\nrefuse if clock.weekday in [sat, sun]\n  because "The curve is closed on weekends"`;
-    ops = 5; cu = 1300; refusalsPct = 28.4;
-  } else if (p.includes('price') || p.includes('%')) {
-    script = `rule "no buys after a ${n}% pump"\nwhen transfer.kind == buy\nlet move = curve.price / curve.price_at(ago: 10m) - 1\nrefuse if move > ${n} / 100\n  because "Price is up more than ${n}% in 10 minutes; buys pause"`;
-    ops = 8; cu = 3900; refusalsPct = 4.2;
-  } else {
-    const title = prompt.length > 60 ? prompt.slice(0, 59).replace(/\s+\S*$/, '') + '…' : prompt;
-    script = `rule "${title.replace(/"/g, "'")}"\nwhen transfer.kind == sell\nlet held = clock.now - wallet.first_receipt\nrefuse if held < ${n}h and transfer.amount > wallet.balance * 0.25\n  because "No single sell over a quarter of your bag in your first ${n}h"`;
-    ops = 10; cu = 3600; refusalsPct = 7.8;
-  }
-  return { prompt, script, ops, cu, fuzz: { trades: 10000, refusedPct: refusalsPct, panics: 0, maxCu: Math.round(cu * 1.18) }, reviewed: false };
+/** The Custom block's Hookscript source (the server compiles it and runs the same checks before it builds the launch). */
+function scriptOf(stack) {
+  const src = stack?.find((s) => s.id === 'custom')?.params?.script;
+  return src ? { source: src } : null;
 }

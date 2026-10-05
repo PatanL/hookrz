@@ -294,3 +294,18 @@ html.bd-lock { overflow: hidden; }
   .bk-legend { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .bk-legend p { margin-top: 2px; }
 }
+
+/* Custom block drawer: draft row, example chips, tester */
+.bd-hsgo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.bd-hsex { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+.bd-chip { background: rgba(255,255,255,.03); border: 1px solid var(--line-2); border-radius: var(--r-1); color: var(--text-2); font: inherit; font-size: 12px; padding: 4px 8px; cursor: pointer; }
+.bd-chip:hover { color: var(--text); border-color: rgba(143,202,255,.45); }
+.bd-hserr { color: var(--refuse); font-size: 13px; margin: 12px 0 0; }
+.bd-hstest { margin-top: 6px; }
+.bd-hstest[hidden] { display: none; }
+.bd-hstest .bd-sub { margin-bottom: 12px; }
+
+.bd-declined { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: var(--r-2); background: rgba(255,255,255,.03); display: grid; gap: 10px; font-size: 13.5px; }
+.bd-declined.hp { border-color: rgba(255,98,87,.45); background: var(--refuse-wash); }
+.bd-declined.hp b { color: var(--refuse); }
+.bd-declined-opts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

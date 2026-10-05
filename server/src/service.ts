@@ -80,6 +80,10 @@ export class Hookrz {
     // Hookscript for a Custom block: { source } (compiled here) or { source, bytecode(base64) }.
     let script = body.script ?? null;
     if (stack.some((x: any) => x.id === "custom")) {
+      // the site sends the source in the Custom slot's params (and as body.script); the server compiles it itself
+      const slotSrc = stack.find((x: any) => x.id === "custom")?.params?.script;
+      if (!script?.source && slotSrc) script = { source: String(slotSrc) };
+      if (script?.source) script = { source: String(script.source) }; // never trust client bytecode: recompile
       // The site sends only the Custom block's English prompt: draft it (the drafter compiles and fuzzes every draft).
       const prompt = stack.find((x: any) => x.id === "custom")?.params?.prompt;
       if (!script && prompt) {
@@ -94,7 +98,9 @@ export class Hookrz {
         const out = lib.compile(String(script.source));
         if (out && out.ok === false) throw new AppError("SCRIPT_INVALID", `Hookscript doesn't compile: ${out.errors.map((e: any) => `${e.line}:${e.col} ${e.message}`).join("; ")}`, 400, out.errors);
         const code: Uint8Array = out instanceof Uint8Array ? out : (out.bytes ?? out.code ?? out.bytecode);
-        script = { source: String(script.source), bytecode: Buffer.from(code).toString("base64"), abi: out.abi ?? null, cu: out.cu ?? null };
+        const verdict = this.scriptCheck(lib, String(script.source), code);
+        if (!verdict.ok) throw new AppError("SCRIPT_UNSAFE", verdict.message, 422, verdict.report);
+        script = { source: String(script.source), bytecode: Buffer.from(code).toString("base64"), abi: out.abi ?? null, cu: out.cu ?? null, fuzz: verdict.report?.fuzz ?? null, honeypot: verdict.report?.honeypot ?? null };
       }
       ensure(script?.bytecode, "A Custom block needs its Hookscript: pass script.source (or draft one at /v1/hookscript/draft)", "SCRIPT_REQUIRED");
     } else script = null;
@@ -513,6 +519,23 @@ export class Hookrz {
   simulate(stack: any[], seed = 7) {
     return { withStack: runSim(stack ?? [], { seed }), noRules: runSim([], { seed }) };
   }
+  /** The launch gate for a hand-written or edited script: 10,000 fuzzed trades with zero errors, and the honeypot check. Cached per source. */
+  private checks = new Map<string, { ok: boolean; message: string; report: any }>();
+  scriptCheck(lib: any, source: string, code: Uint8Array) {
+    const hit = this.checks.get(source);
+    if (hit) return hit;
+    if (!lib?.fuzz) return { ok: true, message: "", report: null }; // fuzzer not available: the drafter path still checks
+    const { fuzz: z, honeypot: h } = lib.fuzz(code, { trades: 10_000, seed: 1, rust: false });
+    const ok = !z.errors && !z.panics && h.ok;
+    const message = ok ? "" : z.errors || z.panics
+      ? `The Hookscript faulted on ${z.errors + z.panics} of ${z.trades} fuzzed trades`
+      : `The Hookscript failed the honeypot check: ${h.notes?.[0] ?? "some holders could never sell"}. Add a time-based way out.`;
+    const r = { ok, message, report: { fuzz: z, honeypot: h } };
+    this.checks.set(source, r);
+    if (this.checks.size > 500) this.checks.delete(this.checks.keys().next().value!);
+    return r;
+  }
+
   /** English → Hookscript (HOOKSCRIPT's drafter: Anthropic API when ANTHROPIC_API_KEY is set, else the offline heuristic;
    *  every draft is compiled, fuzzed and honeypot-checked before it comes back). HOOKSCRIPT_PROVIDER forces one. */
   async draft(prompt: string) {

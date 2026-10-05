@@ -11,7 +11,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compile, type Diag, type Abi } from '../compiler/src/compile.ts';
 import { fuzz, type FuzzReport, type HoneypotReport } from '../fuzz/fuzz.ts';
-import { heuristicDraft } from './heuristic.ts';
+import { heuristicMatch, honeypotIntent, type Suggestion } from './heuristic.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -43,7 +43,15 @@ export interface DraftResult {
   provider: 'anthropic' | 'heuristic';
   model: string | null;
   template: string | null;
+  /** the rule's own title (what the script does); the user's sentence stays in `prompt` */
+  title: string | null;
   attempts: { n: number; ok: boolean; problem: string | null }[];
+  /** set when the drafter declined: why, in one sentence */
+  message?: string;
+  /** offline drafter didn't recognize the rule: the closest rules it can draft */
+  suggestions?: Suggestion[];
+  /** the prompt asked for a honeypot: a safe rule to try instead */
+  alternative?: { prompt: string; title: string; script: string };
 }
 
 // ───── system prompt (stable -> cacheable) ─────
@@ -129,16 +137,27 @@ async function anthropicProvider(opts: DraftOptions): Promise<Provider | null> {
   };
 }
 
+class Unrecognized extends Error {
+  suggestions: Suggestion[];
+  constructor(s: Suggestion[]) { super("The offline drafter doesn't recognize this rule"); this.suggestions = s; }
+}
+
 function heuristicProvider(): Provider {
   const p: Provider = {
     name: 'heuristic', model: null, template: null,
-    first: async (prompt) => { const d = heuristicDraft(prompt); p.template = d.template; if (!d.matched) warnings.push("The offline drafter didn't recognize this rule and used its closest template. Set ANTHROPIC_API_KEY for free-form drafts."); return d.script; },
+    first: async (prompt) => {
+      const m = heuristicMatch(prompt);
+      if (m.kind !== 'match') throw new Unrecognized(m.suggestions);
+      p.template = m.template;
+      return m.script;
+    },
     retry: async () => { throw new Error('The offline drafter has no other version of this rule'); },
   };
-  const warnings: string[] = [];
-  (p as Provider & { warnings: string[] }).warnings = warnings;
   return p;
 }
+
+const ruleTitle = (script: string) => script.match(/^rule\s+"([^"]*)"/m)?.[1] ?? null;
+const hpRefused = (reason: string): HoneypotReport => ({ ok: false, checkedWallets: 0, locked: [], allSellsRefused: false, maxExitHours: 0, notes: [reason] });
 
 // ───── checks ─────
 type Checked =
@@ -173,6 +192,23 @@ export async function draft(prompt: string, opts: DraftOptions = {}): Promise<Dr
   const want = opts.provider ?? 'auto';
   let provider: Provider | null = null;
   const warnings: string[] = [];
+  const declined = (fields: Partial<DraftResult> & { message: string; hint?: string }): DraftResult => {
+    const { hint, ...rest } = fields;
+    return {
+      ok: false, prompt, script: '', bytecodeHex: null, bytes: 0, ops: 0, cu: 0, fuzz: null, honeypot: null, warnings,
+      errors: [{ message: fields.message, line: 1, col: 1, hint }], abi: null, reviewed: false,
+      provider: want === 'anthropic' || (want === 'auto' && process.env.ANTHROPIC_API_KEY) ? 'anthropic' : 'heuristic',
+      model: null, template: null, title: null, attempts: [], ...rest,
+    };
+  };
+  // A rule that stops holders from ever selling is refused before any drafting, whatever the provider.
+  const intent = honeypotIntent(prompt);
+  if (intent) {
+    return declined({
+      message: intent.reason, honeypot: hpRefused(intent.reason), alternative: intent.alternative,
+      hint: `Try instead: "${intent.alternative.prompt}" (${intent.alternative.title}).`,
+    });
+  }
   if (want !== 'heuristic') {
     provider = await anthropicProvider(opts);
     if (!provider && want === 'anthropic') warnings.push('Anthropic provider unavailable (no ANTHROPIC_API_KEY or @anthropic-ai/sdk not installed); used the offline drafter.');
@@ -186,6 +222,14 @@ export async function draft(prompt: string, opts: DraftOptions = {}): Promise<Dr
     try {
       script = n === 1 ? await provider.first(prompt) : await provider.retry(feedbackOf(last as Exclude<Checked, { ok: true }>, script));
     } catch (e) {
+      if (e instanceof Unrecognized) {
+        const list = e.suggestions.map((x) => `"${x.prompt}"`).join(', ');
+        return declined({
+          provider: 'heuristic', attempts: [{ n, ok: false, problem: 'offline drafter: no confident match' }], suggestions: e.suggestions,
+          message: "The offline drafter doesn't know a rule like this, so it didn't draft one.",
+          hint: `Rules it can draft that come closest: ${list}. Or write it in Hookscript yourself in the editor.`,
+        });
+      }
       attempts.push({ n, ok: false, problem: `provider: ${(e as Error).message}` });
       if (provider.name === 'anthropic' && n === 1) {
         // API down / declined: fall back to the offline drafter once
@@ -200,8 +244,7 @@ export async function draft(prompt: string, opts: DraftOptions = {}): Promise<Dr
     attempts.push({ n, ok: last.ok, problem: last.ok ? null : last.stage === 'compile' ? `compile: ${last.errors[0].message}` : `${last.stage}: ${last.problem.split('\n')[0]}` });
     if (last.ok) break;
   }
-  warnings.push(...((provider as Provider & { warnings?: string[] }).warnings ?? []));
-  const base = { prompt, script, reviewed: false as const, provider: provider.name, model: provider.model, template: provider.template, attempts, warnings };
+  const base = { prompt, script, reviewed: false as const, provider: provider.name, model: provider.model, template: provider.template, title: script ? ruleTitle(script) : null, attempts, warnings };
   if (!last) return { ...base, ok: false, bytecodeHex: null, bytes: 0, ops: 0, cu: 0, fuzz: null, honeypot: null, errors: [{ message: 'No draft was produced', line: 1, col: 1 }], abi: null };
   if (last.ok === false && last.stage === 'compile') return { ...base, ok: false, bytecodeHex: null, bytes: 0, ops: 0, cu: 0, fuzz: null, honeypot: null, errors: last.errors, abi: null, warnings: [...warnings, ...last.warnings.map((w) => w.message)] };
   const k = last as Extract<Checked, { c: unknown }>;

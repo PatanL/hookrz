@@ -386,3 +386,14 @@ cd web && VITE_API_BASE=http://127.0.0.1:8830 npx vite --host 127.0.0.1 --port 4
 - To redeploy: `node scripts/deploy-engine.cjs <rpc> <payer.json> <program-keypair.json> ../programs/hookrz-engine/hookrz_engine.so`.
 - To upgrade in place: the same command with the program id and `--upgrade`. It writes and verifies a buffer, grows program-data first if the new .so is bigger (ExtendProgramChecked, falling back to ExtendProgram), runs Upgrade, then checks program-data byte for byte. Tested on devnet 2026-10-04 with the same binary (sig `599s9Q46…`); it cost about 0.001 SOL in fees, and the buffer rent is refunded.
 - When a multisig holds the authority (mainnet): run `--buffer-only --buffer-authority <multisig>`. It writes the buffer and hands it to the multisig, which then proposes Upgrade itself.
+
+## Devnet: engine v2 (all 18 hook blocks) upgraded in place (2026-10-04 22:0x)
+- `deploy-engine.cjs --upgrade` swapped 5bewmr… to the 137,968 B binary (sha256 8da568a1…, sig `4CVat4C8…`). It cost only fees; program-data keeps its 145,704 B room.
+- `scripts/devnet-new-blocks-smoke.ts` (`ONLY=<ids>` reruns a subset). Each new block refused on chain with its own code and let the allowed trade through:
+  - Blocklist: 6006 `4pytfmPh…`
+  - Allowlist Phase: 6007 `oi7X4vnu…`, then the creator granted a pass and the buy landed
+  - Seasoned Sells: 6013 `5n4429Su…`
+  - Outflow Cap: 6014 `4XnqE99T…`
+  - Token Gate: 6017 `9XVTrYXX…`, using a devnet $BONK stand-in (`89dCDiLd…`, in .runtime/devnet-gate.json and HOOKRZ_GATE_MINTS in devnet.env)
+  - Chapters: 6018 `2nHvUFuJ…`
+

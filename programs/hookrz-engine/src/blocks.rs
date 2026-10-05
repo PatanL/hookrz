@@ -214,7 +214,11 @@ fn exponential_fee(cliff: u64, reduction_bps: u64, period: u64) -> u64 {
     if period == 0 || reduction_bps == 0 {
         return cliff;
     }
-    let base = ONE.saturating_sub(((reduction_bps as u128) << 64) / 10_000);
+    // floor(reduction · 2^64 / 10_000) with u64 divisions only (no 128-bit division helper on chain).
+    let r = reduction_bps.min(10_000);
+    let hi = (r << 32) / 10_000;
+    let lo = (((r << 32) % 10_000) << 32) / 10_000;
+    let base = ONE.saturating_sub(((hi as u128) << 32) + lo as u128);
     let (mut result, mut cur, mut e) = (ONE, base, period);
     while e > 0 {
         if e & 1 == 1 {
@@ -278,6 +282,23 @@ pub fn add_lot(lots: &mut [Lot; LOTS], (epoch, live): (i64, i64), t: i64, amount
     }
     lots[i].t = lots[i].t.max(lt);
     lots[i].amount = lots[i].amount.saturating_add(amount);
+}
+
+/// Curve progress in parts per million, capped at 1e6, with u64 maths only: inputs too big for
+/// `a × 1e6` are halved together first (only above ~18,000 SOL of reserve; ppm precision is kept).
+pub fn progress_ppm(quote_reserve: u64, threshold: u64) -> u32 {
+    if threshold == 0 {
+        return 0;
+    }
+    if quote_reserve >= threshold {
+        return 1_000_000;
+    }
+    let (mut a, mut b) = (quote_reserve, threshold);
+    while a > u64::MAX / 1_000_000 {
+        a >>= 1;
+        b >>= 1;
+    }
+    (a * 1_000_000 / b) as u32
 }
 
 /// Lots with an amount, oldest first (for Hookscript).
@@ -499,6 +520,15 @@ mod tests {
         // (9/10)^2 = 0.81: 19% edge passes, 18% refuses.
         assert!(!outside_band(9u128 << 60, s0, 1_900));
         assert!(outside_band(9u128 << 60, s0, 1_800));
+    }
+
+    #[test]
+    fn progress_in_ppm() {
+        assert_eq!(progress_ppm(0, 85_000_000_000), 0);
+        assert_eq!(progress_ppm(21_250_000_000, 85_000_000_000), 250_000);
+        assert_eq!(progress_ppm(85_000_000_000, 85_000_000_000), 1_000_000);
+        assert_eq!(progress_ppm(u64::MAX / 2, u64::MAX), 499_999);
+        assert_eq!(progress_ppm(5, 0), 0);
     }
 
     #[test]

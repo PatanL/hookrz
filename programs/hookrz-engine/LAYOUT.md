@@ -80,8 +80,15 @@ Token-2022 calls it with `[source, mint, destination, authority, extra-account-m
 - **buy** = source is the pool base vault, **sell** = destination is the base vault, otherwise **send**.
 - If the stack uses wallet records: a missing record for the sender (sells, sends) or receiver (buys, sends) → **6141** `MissingWalletRecord`.
 - Slots run in order; the first refusal fails the transfer with that block's code; the program log reads
-  `Error Code: MaxWalletExceeded. Error Number: 6003`. Then the Hookscript, if any: a refusal logs
-  `Hookscript: <reason text>` and fails with **6128**; a VM fault logs `HookscriptFault: <name>` and fails with 6128.
+  `Error Code: MaxWalletExceeded. Error Number: 6003` (a static string per code). Then the Hookscript, if any. A refusal
+  fails with **6128** and logs three lines, with no on-chain formatting:
+  ```
+  Program log: Hookscript: <the reason's template as stored, "{}" unfilled, non-ASCII bytes as "?">
+  Program log: 0x17f0, 0x<reason id>, 0x<arg as u64 (two's complement for negatives)>, 0x<format kind>, 0x0
+  Program log: Error Code: CustomRuleRefused. Error Number: 6128
+  ```
+  Off-chain code fills the message with `format_reason(code, reason_id, arg)` (hookscript compiler/TS). A VM fault logs
+  `HookscriptFault: <name>` and fails with 6128.
 - State is written only after every check passed (the VM writes globals and wallet vars only on Allow).
 - Hookscript Ctx: filled as hookscript/SPEC.md §8 says. `fee_bps` is the DBC base fee from the schedule copied at init (no dynamic
   fee); `price_e6`, `progress_ppm` and `fee_bps` are filled only when the script has the CURVE flag; `app` is zeros unless

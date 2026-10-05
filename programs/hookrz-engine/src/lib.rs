@@ -16,37 +16,42 @@
 //!
 //! Account layouts and instruction data: see LAYOUT.md.
 
-#![allow(deprecated)]
+#![cfg_attr(target_os = "solana", no_std)]
 
 pub mod blocks;
 
 use blocks::{Ctx, Kind, Lot, WalletView, LOTS, MAX_SLOTS, PARAMS, STATE};
-use solana_program::{
-    account_info::AccountInfo,
-    clock::Clock,
-    entrypoint::ProgramResult,
-    msg,
-    program::{invoke, invoke_signed},
-    program_error::ProgramError,
-    pubkey,
-    pubkey::Pubkey,
-    rent::Rent,
-    system_instruction, system_program,
-    sysvar::Sysvar,
+use pinocchio::{
+    cpi::{Seed as CpiSeed, Signer},
+    error::ProgramError,
+    sysvars::{clock::Clock, rent::Rent, Sysvar},
+    AccountView, Address, ProgramResult,
 };
+use pinocchio_system::instructions::{Allocate, Assign, CreateAccount, Transfer};
 
-// The local-fork address, for off-chain callers and tests only. The program itself never reads `ID`:
-// every owner and PDA check uses the `program_id` the runtime passes to the entrypoint, so one build
-// works at any deployed address (fork, devnet, mainnet). The fork suite runs a second time at a random
-// address to prove it (`ENGINE_ID=… npm test`).
-solana_program::declare_id!("EiZ3npNmrPCkAjskdMR7RDJQcojC9p8CHNr1dR4DPxKr");
+type Pubkey = Address;
+const fn pubkey(s: &str) -> Address {
+    Address::from_str_const(s)
+}
+const SYSTEM_PROGRAM: Address = Address::new_from_array([0u8; 32]);
 
+/// The local-fork address, for off-chain callers and tests only. The program itself never reads it:
+/// every owner and PDA check uses the `program_id` the runtime passes to the entrypoint, so one build
+/// works at any deployed address (fork, devnet, mainnet). The fork suite runs a second time at a random
+/// address to prove it (`ENGINE_ID=… npm test`).
+pub const LOCAL_FORK_ID: Address = pubkey("EiZ3npNmrPCkAjskdMR7RDJQcojC9p8CHNr1dR4DPxKr");
+
+// pinocchio entrypoint: zero-copy accounts, no allocator, a panic handler that never formats.
 #[cfg(not(feature = "no-entrypoint"))]
-solana_program::entrypoint!(process_instruction);
+pinocchio::program_entrypoint!(process_instruction);
+#[cfg(not(feature = "no-entrypoint"))]
+pinocchio::no_allocator!();
+#[cfg(not(feature = "no-entrypoint"))]
+pinocchio::nostd_panic_handler!();
 
-pub const TOKEN_2022: Pubkey = pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
-pub const DBC_PROGRAM: Pubkey = pubkey!("dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN");
-pub const DBC_POOL_AUTHORITY: Pubkey = pubkey!("FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM");
+pub const TOKEN_2022: Pubkey = pubkey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+pub const DBC_PROGRAM: Pubkey = pubkey("dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN");
+pub const DBC_POOL_AUTHORITY: Pubkey = pubkey("FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM");
 /// sha256("spl-transfer-hook-interface:execute")[..8]
 pub const EXECUTE_DISCRIMINATOR: [u8; 8] = [105, 37, 101, 197, 75, 251, 102, 26];
 /// DBC account discriminators.
@@ -150,7 +155,7 @@ pub const SCRIPT_GLOBALS: usize = 256;
 /// Hookscript header flag: the script reads `transfer.app` (needs the instructions sysvar).
 #[cfg_attr(not(feature = "hookscript"), allow(dead_code))]
 const HS_FLAG_APP: u8 = 0x08;
-pub const INSTRUCTIONS_SYSVAR: Pubkey = pubkey!("Sysvar1nstructions1111111111111111111111111");
+pub const INSTRUCTIONS_SYSVAR: Pubkey = pubkey("Sysvar1nstructions1111111111111111111111111");
 
 const META_SIZE: usize = 35;
 
@@ -169,11 +174,75 @@ impl From<EngineError> for ProgramError {
     }
 }
 fn refuse(code: u32) -> ProgramError {
-    msg!("Error Code: {}. Error Number: {}", blocks::name_of(code), code);
+    log(error_line(code));
     ProgramError::Custom(code)
 }
+/// Logging without core::fmt: static text only (numbers go through `log_64`).
+fn log(s: &str) {
+    #[cfg(target_os = "solana")]
+    unsafe {
+        pinocchio::syscalls::sol_log_(s.as_ptr(), s.len() as u64)
+    };
+    #[cfg(not(target_os = "solana"))]
+    let _ = s;
+}
+fn log_64(a: u64, b: u64, c: u64, d: u64, e: u64) {
+    #[cfg(target_os = "solana")]
+    unsafe {
+        pinocchio::syscalls::sol_log_64_(a, b, c, d, e)
+    };
+    #[cfg(not(target_os = "solana"))]
+    let _ = (a, b, c, d, e);
+}
+/// PDA derivation (a syscall on chain; never called by host tests).
+#[cfg(target_os = "solana")]
+fn find_pda(seeds: &[&[u8]], program_id: &Address) -> (Address, u8) {
+    Address::find_program_address(seeds, program_id)
+}
+#[cfg(not(target_os = "solana"))]
+fn find_pda(_seeds: &[&[u8]], _program_id: &Address) -> (Address, u8) {
+    unimplemented!("PDA derivation is on-chain only")
+}
+#[cfg_attr(not(feature = "hookscript"), allow(dead_code))]
+/// Log `prefix` + `text` through a stack buffer, no formatting. Non-ASCII bytes are logged as `?`,
+/// so the line is always valid UTF-8 for the log syscall without linking a UTF-8 validator (the
+/// exact text is in the Script account; off-chain code formats it from the reason id and arg).
+fn log_join(prefix: &str, text: &[u8]) {
+    let mut buf = [0u8; 160];
+    let p = prefix.len().min(buf.len());
+    buf[..p].copy_from_slice(&prefix.as_bytes()[..p]);
+    let n = text.len().min(buf.len() - p);
+    for (d, &c) in buf[p..p + n].iter_mut().zip(text) {
+        *d = if c.is_ascii() { c } else { b'?' };
+    }
+    // SAFETY: `prefix` is a &str and every other byte is ASCII.
+    log(unsafe { core::str::from_utf8_unchecked(&buf[..p + n]) });
+}
+/// The refusal log line, Anchor-style, as a static string per code (the indexer matches on it).
+fn error_line(code: u32) -> &'static str {
+    match code {
+        6000 => "Error Code: NotInTransfer. Error Number: 6000",
+        6001 => "Error Code: SnipeWindow. Error Number: 6001",
+        6002 => "Error Code: BundleLimit. Error Number: 6002",
+        6003 => "Error Code: MaxWalletExceeded. Error Number: 6003",
+        6004 => "Error Code: RisingCapExceeded. Error Number: 6004",
+        6005 => "Error Code: SandwichLockout. Error Number: 6005",
+        6008 => "Error Code: SellCapExceeded. Error Number: 6008",
+        6009 => "Error Code: SellCooldown. Error Number: 6009",
+        6010 => "Error Code: StillSettling. Error Number: 6010",
+        6011 => "Error Code: CircuitBreaker. Error Number: 6011",
+        6012 => "Error Code: MarketClosed. Error Number: 6012",
+        6015 => "Error Code: LockInPhase. Error Number: 6015",
+        6016 => "Error Code: CreatorVesting. Error Number: 6016",
+        6128 => "Error Code: CustomRuleRefused. Error Number: 6128",
+        6141 => "Error Code: MissingWalletRecord. Error Number: 6141",
+        6142 => "Error Code: HookLive. Error Number: 6142",
+        6143 => "Error Code: StackLocked. Error Number: 6143",
+        _ => "Error Code: Custom",
+    }
+}
 
-pub fn process_instruction(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
+pub fn process_instruction(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
     if data.len() >= 16 && data[..8] == EXECUTE_DISCRIMINATOR {
         let amount = u64::from_le_bytes(rd(data, 8));
         return execute(program_id, accounts, amount);
@@ -188,15 +257,21 @@ pub fn process_instruction(program_id: &Pubkey, accounts: &[AccountInfo], data: 
     }
 }
 
+#[inline(always)]
 fn rd<const N: usize>(d: &[u8], at: usize) -> [u8; N] {
-    d[at..at + N].try_into().unwrap()
+    let mut a = [0u8; N];
+    a.copy_from_slice(&d[at..at + N]);
+    a
 }
+#[inline(always)]
 fn u64_at(d: &[u8], at: usize) -> u64 {
     u64::from_le_bytes(rd(d, at))
 }
+#[inline(always)]
 fn i64_at(d: &[u8], at: usize) -> i64 {
     i64::from_le_bytes(rd(d, at))
 }
+#[inline(always)]
 fn key_at(d: &[u8], at: usize) -> &[u8] {
     &d[at..at + 32]
 }
@@ -294,11 +369,11 @@ fn note_outflow(d: &mut [u8], ep: (i64, i64), t: i64, now: i64, amount: u64, sel
 
 /// The wallet record for `token_account`, if this account is one. A record of ours that names a
 /// different mint or token account is a forged account list and fails the transfer.
-fn load_wallet(program_id: &Pubkey, ai: &AccountInfo, mint: &Pubkey, token_account: &Pubkey) -> Result<Option<WalletRec>, ProgramError> {
-    if ai.owner != program_id {
+fn load_wallet(program_id: &Pubkey, ai: &AccountView, mint: &Pubkey, token_account: &Pubkey) -> Result<Option<WalletRec>, ProgramError> {
+    if !ai.owned_by(program_id) {
         return Ok(None);
     }
-    let d = ai.try_borrow_data()?;
+    let d = ai.try_borrow()?;
     if d.len() < WALLET_SIZE
         || d[..8] != WALLET_DISC
         || d[W_VERSION] != 1
@@ -322,7 +397,7 @@ fn load_wallet(program_id: &Pubkey, ai: &AccountInfo, mint: &Pubkey, token_accou
     }))
 }
 
-fn execute(program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> ProgramResult {
+fn execute(program_id: &Pubkey, accounts: &mut [AccountView], amount: u64) -> ProgramResult {
     let [source, mint, destination, _authority, _meta_list, stack_ai, rest @ ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
@@ -330,21 +405,21 @@ fn execute(program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Progra
     // TransferHookAccount.transferring = true for the duration of the hook call, and both sides
     // must be accounts of `mint`. This program makes no CPIs, so an account of `mint` can only be
     // transferring inside a genuine transfer of `mint`, whose hook is this program.
-    if source.owner != &TOKEN_2022 || mint.owner != &TOKEN_2022 || destination.owner != &TOKEN_2022 {
+    if !source.owned_by(&TOKEN_2022) || !mint.owned_by(&TOKEN_2022) || !destination.owned_by(&TOKEN_2022) {
         return Err(EngineError::NotInTransfer.into());
     }
-    let src = source.try_borrow_data()?;
-    let dst = destination.try_borrow_data()?;
-    if !token_account_of(&src, mint.key) || !token_account_of(&dst, mint.key) || !is_transferring(&src) {
+    let src = source.try_borrow()?;
+    let dst = destination.try_borrow()?;
+    if !token_account_of(&src, mint.address()) || !token_account_of(&dst, mint.address()) || !is_transferring(&src) {
         return Err(EngineError::NotInTransfer.into());
     }
 
     // The Stack: ours, and for this mint. (Only init_stack creates Stack accounts, at the mint's PDA.)
-    if stack_ai.owner != program_id {
+    if !stack_ai.owned_by(program_id) {
         return Err(ProgramError::InvalidAccountData);
     }
-    let sd = stack_ai.try_borrow_data()?;
-    if sd.len() < STACK_SIZE || sd[..8] != STACK_DISC || sd[S_VERSION] != 1 || key_at(&sd, S_MINT) != mint.key.as_ref() {
+    let sd = stack_ai.try_borrow()?;
+    if sd.len() < STACK_SIZE || sd[..8] != STACK_DISC || sd[S_VERSION] != 1 || key_at(&sd, S_MINT) != mint.address().as_ref() {
         return Err(ProgramError::InvalidAccountData);
     }
     let flags = u16::from_le_bytes(rd(&sd, S_FLAGS));
@@ -355,9 +430,9 @@ fn execute(program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Progra
     let launch_ts = i64_at(&sd, S_LAUNCH_TS);
     let last_sqrt = u128::from_le_bytes(rd(&sd, S_LAST_SQRT));
 
-    let kind = if source.key.as_ref() == base_vault {
+    let kind = if source.address().as_ref() == base_vault {
         Kind::Buy
-    } else if destination.key.as_ref() == base_vault {
+    } else if destination.address().as_ref() == base_vault {
         Kind::Sell
     } else {
         Kind::Send
@@ -369,7 +444,7 @@ fn execute(program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Progra
     let src_after = u64_at(&src, 64);
     let dst_after = u64_at(&dst, 64);
     let (supply, decimals) = {
-        let md = mint.try_borrow_data()?;
+        let md = mint.try_borrow()?;
         if md.len() < 82 {
             return Err(ProgramError::InvalidAccountData);
         }
@@ -394,18 +469,18 @@ fn execute(program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Progra
         slot_buys: 0,
         creator_base: 0,
     };
-    let mut rest = rest.iter();
+    let mut rest = rest.iter_mut();
 
     // L1: the pool is read only after checking it still names this coin and its vault.
     if flags & F_POOL != 0 {
         let pool = rest.next().ok_or(ProgramError::NotEnoughAccountKeys)?;
-        if pool.key.as_ref() != key_at(&sd, S_POOL) || pool.owner != &DBC_PROGRAM {
+        if pool.address().as_ref() != key_at(&sd, S_POOL) || !pool.owned_by(&DBC_PROGRAM) {
             return Err(ProgramError::InvalidAccountData);
         }
-        let pd = pool.try_borrow_data()?;
+        let pd = pool.try_borrow()?;
         if pd.len() < POOL_SQRT_PRICE + 16
             || pd[..8] != DBC_HOOK_POOL_DISC
-            || key_at(&pd, POOL_BASE_MINT) != mint.key.as_ref()
+            || key_at(&pd, POOL_BASE_MINT) != mint.address().as_ref()
             || key_at(&pd, POOL_BASE_VAULT) != base_vault
         {
             return Err(ProgramError::InvalidAccountData);
@@ -416,21 +491,21 @@ fn execute(program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Progra
 
     // Wallet records: the sender's is required unless it's the curve vault (buys); the
     // receiver's unless it's the curve vault (sells).
-    let mut wallet_accts: Option<(&AccountInfo, &AccountInfo)> = None;
+    let mut wallet_accts: Option<(&mut AccountView, &mut AccountView)> = None;
     let mut dst_rec: Option<WalletRec> = None;
     let mut src_rec: Option<WalletRec> = None;
     if flags & F_WALLETS != 0 {
         let ws = rest.next().ok_or(ProgramError::NotEnoughAccountKeys)?;
         let wd = rest.next().ok_or(ProgramError::NotEnoughAccountKeys)?;
         if kind != Kind::Buy {
-            src_rec = load_wallet(program_id, ws, mint.key, source.key)?;
+            src_rec = load_wallet(program_id, ws, mint.address(), source.address())?;
             match &src_rec {
                 Some(r) => ctx.w = r.view(launch_ts),
                 None => return Err(refuse(EngineError::MissingWalletRecord as u32)),
             }
         }
         if kind != Kind::Sell {
-            dst_rec = load_wallet(program_id, wd, mint.key, destination.key)?;
+            dst_rec = load_wallet(program_id, wd, mint.address(), destination.address())?;
             if dst_rec.is_none() {
                 return Err(refuse(EngineError::MissingWalletRecord as u32));
             }
@@ -489,7 +564,7 @@ fn execute(program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Progra
             dst_key: rd(dst_owner, 0),
             src_before: ctx.src_before,
             dst_before: dst_after.saturating_sub(amount),
-            same_wallet: source.key == destination.key,
+            same_wallet: source.address() == destination.address(),
             app: match ix_sysvar {
                 Some(ai) => top_level_program(ai)?,
                 None => [0u8; 32],
@@ -498,7 +573,8 @@ fn execute(program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Progra
             activation_point: u64_at(&sd, S_ACTIVATION_POINT),
             slot: clock.slot,
         };
-        run_script(program_id, &sd, script, &ctx, &env, wallet_accts, src_rec.as_ref(), dst_rec.as_ref())?;
+        let w = wallet_accts.as_mut().map(|(a, b)| (&mut **a, &mut **b));
+        run_script(program_id, &sd, script, &ctx, &env, w, src_rec.as_ref(), dst_rec.as_ref())?;
     }
 
     // ───── every check passed: write state ─────
@@ -506,7 +582,7 @@ fn execute(program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Progra
     drop(dst);
     drop(sd);
     if flags & F_STACK_WRITABLE != 0 {
-        let mut sd = stack_ai.try_borrow_mut_data()?;
+        let mut sd = stack_ai.try_borrow_mut()?;
         for (i, (id, _, st)) in slots.iter().enumerate().take(n) {
             let at = S_SLOTS + i * SLOT_SIZE + 2 + PARAMS;
             match *id {
@@ -540,10 +616,10 @@ fn execute(program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Progra
         let ep = blocks::lot_epoch(hold_secs);
         if dst_rec.is_some() {
             let taint = src_rec.as_ref().filter(|r| kind == Kind::Send && r.flags & WF_HAS_BUY != 0).map(|r| (r.last_buy_slot, r.last_buy_ts));
-            note_receipt(&mut wd.try_borrow_mut_data()?, ep, ctx.t, now, clock.slot, amount, kind == Kind::Buy, taint);
+            note_receipt(&mut wd.try_borrow_mut()?, ep, ctx.t, now, clock.slot, amount, kind == Kind::Buy, taint);
         }
         if src_rec.is_some() {
-            note_outflow(&mut ws.try_borrow_mut_data()?, ep, ctx.t, now, amount, kind == Kind::Sell);
+            note_outflow(&mut ws.try_borrow_mut()?, ep, ctx.t, now, amount, kind == Kind::Sell);
         }
     }
     Ok(())
@@ -571,11 +647,11 @@ struct ScriptEnv {
 
 /// Program id of the top-level instruction being executed, from the instructions sysvar
 /// (`u16 count · u16 offsets[count] · instructions… · u16 current index`).
-fn top_level_program(ai: &AccountInfo) -> Result<[u8; 32], ProgramError> {
-    if ai.key != &INSTRUCTIONS_SYSVAR {
+fn top_level_program(ai: &AccountView) -> Result<[u8; 32], ProgramError> {
+    if ai.address() != &INSTRUCTIONS_SYSVAR {
         return Err(ProgramError::InvalidAccountData);
     }
-    let d = ai.try_borrow_data()?;
+    let d = ai.try_borrow()?;
     let bad = ProgramError::InvalidAccountData;
     if d.len() < 4 {
         return Err(bad);
@@ -593,7 +669,8 @@ fn top_level_program(ai: &AccountInfo) -> Result<[u8; 32], ProgramError> {
 
 /// Hookscript: runs after every block passed; refuses with 6128.
 #[cfg(not(feature = "hookscript"))]
-fn run_script(_program_id: &Pubkey, _sd: &[u8], _script: &AccountInfo, _ctx: &Ctx, _env: &ScriptEnv, _w: Option<(&AccountInfo, &AccountInfo)>, _s: Option<&WalletRec>, _d: Option<&WalletRec>) -> ProgramResult {
+#[allow(clippy::too_many_arguments)]
+fn run_script(_program_id: &Pubkey, _sd: &[u8], _script: &mut AccountView, _ctx: &Ctx, _env: &ScriptEnv, _w: Option<(&mut AccountView, &mut AccountView)>, _s: Option<&WalletRec>, _d: Option<&WalletRec>) -> ProgramResult {
     // Built without the VM: init_stack refuses scripted stacks, so this is unreachable; fail closed.
     Err(refuse(EngineError::CustomRuleRefused as u32))
 }
@@ -636,18 +713,18 @@ fn vm_wallet(key: [u8; 32], is_pool: bool, balance: u64, rec: Option<&WalletRec>
 fn run_script(
     program_id: &Pubkey,
     sd: &[u8],
-    script: &AccountInfo,
+    script: &mut AccountView,
     ctx: &Ctx,
     env: &ScriptEnv,
-    wallets: Option<(&AccountInfo, &AccountInfo)>,
+    wallets: Option<(&mut AccountView, &mut AccountView)>,
     src_rec: Option<&WalletRec>,
     dst_rec: Option<&WalletRec>,
 ) -> ProgramResult {
     use hookscript_vm as vm;
-    if script.owner != program_id || script.key.as_ref() != key_at(sd, S_SCRIPT) {
+    if !script.owned_by(program_id) || script.address().as_ref() != key_at(sd, S_SCRIPT) {
         return Err(ProgramError::InvalidAccountData);
     }
-    let mut sdata = script.try_borrow_mut_data()?;
+    let mut sdata = script.try_borrow_mut()?;
     if sdata.len() < SCRIPT_SIZE || sdata[..8] != SCRIPT_DISC || sdata[SC_VERSION] != 1 {
         return Err(ProgramError::InvalidAccountData);
     }
@@ -675,7 +752,7 @@ fn run_script(
         launch_ts: env.launch_ts,
         launch_slot: env.launch_slot,
         price_e6: if curve { vm::price_e6_from_sqrt_q64(ctx.sqrt_after, env.decimals) } else { 0 },
-        progress_ppm: if !curve || ctx.threshold == 0 { 0 } else { ((ctx.quote_reserve as u128) * 1_000_000 / ctx.threshold as u128).min(1_000_000) as u32 },
+        progress_ppm: if curve { blocks::progress_ppm(ctx.quote_reserve, ctx.threshold) } else { 0 },
         quote_reserve: ctx.quote_reserve,
         fee_bps: if curve { fee_bps(&env.fee_state, env.activation_point, env.slot, env.now) } else { 0 },
         creator: env.creator,
@@ -689,10 +766,10 @@ fn run_script(
     let (mut ws_data, mut wd_data) = (None, None);
     if let Some((ws, wd)) = wallets {
         if src_rec.is_some() {
-            ws_data = Some(ws.try_borrow_mut_data()?);
+            ws_data = Some(ws.try_borrow_mut()?);
         }
         if dst_rec.is_some() && !env.same_wallet {
-            wd_data = Some(wd.try_borrow_mut_data()?);
+            wd_data = Some(wd.try_borrow_mut()?);
         }
     }
     let wsrc: &mut [u8] = match ws_data.as_mut() {
@@ -706,13 +783,16 @@ fn run_script(
     match vm::run(code, &vctx, globals, wsrc, wdst) {
         Ok(vm::Verdict::Allow) => Ok(()),
         Ok(vm::Verdict::Refuse { reason_id, arg }) => {
-            let mut buf = [0u8; 160];
-            let n = vm::format_reason(code, reason_id, arg, &mut buf).min(buf.len());
-            msg!("Hookscript: {}", core::str::from_utf8(&buf[..n]).unwrap_or("refused"));
+            // The reason's template as stored in the script ("{}" unfilled), then the numbers:
+            // 6128, reason id, arg (i64 as u64), the template's format kind. Off-chain code formats
+            // the message with format_reason (TS) from these.
+            let (fmt, text) = vm::reason(code, reason_id).unwrap_or((0, b"refused"));
+            log_join("Hookscript: ", text);
+            log_64(6128, reason_id as u64, arg as u64, fmt as u64, 0);
             Err(refuse(EngineError::CustomRuleRefused as u32))
         }
         Err(e) => {
-            msg!("HookscriptFault: {}", e.name());
+            log_join("HookscriptFault: ", e.name().as_bytes());
             Err(refuse(EngineError::CustomRuleRefused as u32))
         }
     }
@@ -764,14 +844,14 @@ fn tlv(d: &[u8], account_type_at: usize, account_type: u8, ext: u16) -> Option<&
 // ───────────────────────── init_stack (pool creator, once, in the launch) ─────────────────────────
 /// Accounts: creator (signer, w), mint, DBC pool, DBC config, stack (w), extra-account-metas (w),
 /// script (w), system program, [parent stack].
-fn init_stack(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> ProgramResult {
+fn init_stack(program_id: &Pubkey, accounts: &mut [AccountView], args: &[u8]) -> ProgramResult {
     let [creator, mint, pool, config, stack_ai, meta_list, script_ai, system, more @ ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
-    if !creator.is_signer {
+    if !creator.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
     }
-    if system.key != &system_program::ID {
+    if system.address() != &SYSTEM_PROGRAM {
         return Err(ProgramError::IncorrectProgramId);
     }
 
@@ -806,9 +886,9 @@ fn init_stack(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Pro
     let inline_script = &args[at..];
     // A script too big for the launch transaction is staged first with write_script (0xA4).
     let staged_ref = if staged {
-        let d = script_ai.try_borrow_data()?;
-        if script_ai.owner != program_id || d.len() < SCRIPT_SIZE || d[..8] != SCRIPT_DISC || d[SC_VERSION] != 0 {
-            msg!("No staged script");
+        let d = script_ai.try_borrow()?;
+        if !script_ai.owned_by(program_id) || d.len() < SCRIPT_SIZE || d[..8] != SCRIPT_DISC || d[SC_VERSION] != 0 {
+            log("No staged script");
             return Err(ProgramError::InvalidAccountData);
         }
         Some(d)
@@ -828,7 +908,8 @@ fn init_stack(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Pro
     let mut has_custom = false;
     for (i, (id, p)) in slots.iter().take(n).enumerate() {
         if !blocks::known(*id) || !blocks::valid_params(*id, p) || slots[..i].iter().any(|(o, _)| o == id) {
-            msg!("Slot {}: unknown block, bad params or a duplicate", i);
+            log("A slot has an unknown block, bad params or a duplicate");
+            log_64(i as u64, *id as u64, 0, 0, 0);
             return Err(ProgramError::InvalidInstructionData);
         }
         if blocks::needs_pool(*id) {
@@ -843,19 +924,19 @@ fn init_stack(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Pro
         has_custom |= *id == blocks::CUSTOM;
     }
     if has_custom != (script_len > 0) {
-        msg!("A Custom slot and a Hookscript go together");
+        log("A Custom slot and a Hookscript go together");
         return Err(ProgramError::InvalidInstructionData);
     }
     #[cfg(not(feature = "hookscript"))]
     if has_custom {
-        msg!("This build has no Hookscript VM");
+        log("This build has no Hookscript VM");
         return Err(ProgramError::InvalidInstructionData);
     }
     #[cfg(feature = "hookscript")]
     if has_custom {
         #[cfg(feature = "hookscript")]
         if let Err(e) = hookscript_vm::verify(script) {
-            msg!("Hookscript rejected by verify: {}", e.name());
+            log_join("Hookscript rejected by verify: ", e.name().as_bytes());
             return Err(refuse(EngineError::CustomRuleRefused as u32));
         }
         // A script reads the curve (price, progress) and both wallet records.
@@ -866,37 +947,37 @@ fn init_stack(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Pro
     }
 
     // ── the mint must name this program as its hook, with the DBC pool authority as hook authority ──
-    if mint.owner != &TOKEN_2022 {
+    if !mint.owned_by(&TOKEN_2022) {
         return Err(ProgramError::IllegalOwner);
     }
-    match mint_hook(&mint.try_borrow_data()?) {
+    match mint_hook(&mint.try_borrow()?) {
         Some((authority, program)) if program == program_id.to_bytes() && authority == DBC_POOL_AUTHORITY.to_bytes() => {}
         _ => {
-            msg!("The mint's TransferHook must name hookrz_engine with the DBC pool authority");
+            log("The mint's TransferHook must name hookrz_engine with the DBC pool authority");
             return Err(ProgramError::InvalidAccountData);
         }
     }
     // ── the pool: the DBC hooked curve of this mint, created by the signer ──
-    if pool.owner != &DBC_PROGRAM || config.owner != &DBC_PROGRAM {
+    if !pool.owned_by(&DBC_PROGRAM) || !config.owned_by(&DBC_PROGRAM) {
         return Err(ProgramError::IllegalOwner);
     }
     let (base_vault, sqrt) = {
-        let d = pool.try_borrow_data()?;
-        if d.len() < POOL_SQRT_PRICE + 16 || d[..8] != DBC_HOOK_POOL_DISC || key_at(&d, POOL_BASE_MINT) != mint.key.as_ref() {
+        let d = pool.try_borrow()?;
+        if d.len() < POOL_SQRT_PRICE + 16 || d[..8] != DBC_HOOK_POOL_DISC || key_at(&d, POOL_BASE_MINT) != mint.address().as_ref() {
             return Err(ProgramError::InvalidAccountData);
         }
         // Only the pool's creator can arm its stack (no front-running a launch with other rules).
-        if key_at(&d, POOL_CREATOR) != creator.key.as_ref() {
-            msg!("Only the pool creator can write the stack");
+        if key_at(&d, POOL_CREATOR) != creator.address().as_ref() {
+            log("Only the pool creator can write the stack");
             return Err(ProgramError::InvalidAccountData);
         }
-        if key_at(&d, POOL_CONFIG) != config.key.as_ref() {
+        if key_at(&d, POOL_CONFIG) != config.address().as_ref() {
             return Err(ProgramError::InvalidAccountData);
         }
         (Pubkey::new_from_array(rd(&d, POOL_BASE_VAULT)), u128::from_le_bytes(rd(&d, POOL_SQRT_PRICE)))
     };
     let (threshold, fee_schedule) = {
-        let d = config.try_borrow_data()?;
+        let d = config.try_borrow()?;
         if d.len() < CONFIG_MIGRATION_QUOTE_THRESHOLD + 8 || (d[..8] != DBC_HOOK_CONFIG_DISC && d[..8] != DBC_CONFIG_DISC) {
             return Err(ProgramError::InvalidAccountData);
         }
@@ -907,30 +988,30 @@ fn init_stack(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Pro
         f[28] = d[CONFIG_DYNAMIC_FEE_ON];
         (u64_at(&d, CONFIG_MIGRATION_QUOTE_THRESHOLD), f)
     };
-    let activation_point = u64_at(&pool.try_borrow_data()?, POOL_ACTIVATION_POINT);
+    let activation_point = u64_at(&pool.try_borrow()?, POOL_ACTIVATION_POINT);
     if threshold == 0 {
         return Err(ProgramError::InvalidAccountData);
     }
     // ── the parent stack (a remix), if any ──
     let parent = if data_flags & 1 != 0 {
         let p = more.first().ok_or(ProgramError::NotEnoughAccountKeys)?;
-        let d = p.try_borrow_data()?;
-        if p.owner != program_id || d.len() < STACK_SIZE || d[..8] != STACK_DISC {
+        let d = p.try_borrow()?;
+        if !p.owned_by(program_id) || d.len() < STACK_SIZE || d[..8] != STACK_DISC {
             return Err(ProgramError::InvalidAccountData);
         }
-        Some((*p.key, Pubkey::new_from_array(rd(&d, S_CREATOR))))
+        Some((*p.address(), Pubkey::new_from_array(rd(&d, S_CREATOR))))
     } else {
         None
     };
 
     // ── PDAs ──
-    let (stack_key, stack_bump) = Pubkey::find_program_address(&[STACK_SEED, mint.key.as_ref()], program_id);
-    let (meta_key, meta_bump) = Pubkey::find_program_address(&[EXTRA_METAS_SEED, mint.key.as_ref()], program_id);
-    let (script_key, script_bump) = Pubkey::find_program_address(&[SCRIPT_SEED, mint.key.as_ref()], program_id);
-    if stack_ai.key != &stack_key || meta_list.key != &meta_key || script_ai.key != &script_key {
+    let (stack_key, stack_bump) = find_pda(&[STACK_SEED, mint.address().as_ref()], program_id);
+    let (meta_key, meta_bump) = find_pda(&[EXTRA_METAS_SEED, mint.address().as_ref()], program_id);
+    let (script_key, script_bump) = find_pda(&[SCRIPT_SEED, mint.address().as_ref()], program_id);
+    if stack_ai.address() != &stack_key || meta_list.address() != &meta_key || script_ai.address() != &script_key {
         return Err(ProgramError::InvalidSeeds);
     }
-    if stack_ai.owner == program_id || meta_list.owner == program_id || (script_ai.owner == program_id && !staged) {
+    if stack_ai.owned_by(program_id) || meta_list.owned_by(program_id) || (script_ai.owned_by(program_id) && !staged) {
         return Err(refuse(EngineError::StackLocked as u32));
     }
     drop(staged_ref);
@@ -941,7 +1022,7 @@ fn init_stack(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Pro
     metas[m] = pda_meta(&[Seed::Literal(STACK_SEED), Seed::Key(1)], flags & F_STACK_WRITABLE != 0);
     m += 1;
     if flags & F_POOL != 0 {
-        metas[m] = fixed_meta(pool.key, false);
+        metas[m] = fixed_meta(pool.address(), false);
         m += 1;
     }
     if flags & F_WALLETS != 0 {
@@ -958,9 +1039,9 @@ fn init_stack(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Pro
         m += 1;
     }
     let meta_len = 8 + 4 + 4 + META_SIZE * m;
-    create_pda(creator, meta_list, system, meta_len, program_id, &[EXTRA_METAS_SEED, mint.key.as_ref(), &[meta_bump]])?;
+    create_pda(creator, meta_list, meta_len, program_id, &[EXTRA_METAS_SEED, mint.address().as_ref(), &[meta_bump]])?;
     {
-        let mut d = meta_list.try_borrow_mut_data()?;
+        let mut d = meta_list.try_borrow_mut()?;
         d[..8].copy_from_slice(&EXECUTE_DISCRIMINATOR);
         d[8..12].copy_from_slice(&((4 + META_SIZE * m) as u32).to_le_bytes());
         d[12..16].copy_from_slice(&(m as u32).to_le_bytes());
@@ -972,10 +1053,10 @@ fn init_stack(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Pro
     // ── Script ──
     if staged {
         // Seal the staged script: version 1 makes it immutable and live.
-        script_ai.try_borrow_mut_data()?[SC_VERSION] = 1;
+        script_ai.try_borrow_mut()?[SC_VERSION] = 1;
     } else if flags & F_SCRIPT != 0 {
-        create_pda(creator, script_ai, system, SCRIPT_SIZE, program_id, &[SCRIPT_SEED, mint.key.as_ref(), &[script_bump]])?;
-        let mut d = script_ai.try_borrow_mut_data()?;
+        create_pda(creator, script_ai, SCRIPT_SIZE, program_id, &[SCRIPT_SEED, mint.address().as_ref(), &[script_bump]])?;
+        let mut d = script_ai.try_borrow_mut()?;
         d[..8].copy_from_slice(&SCRIPT_DISC);
         d[SC_VERSION] = 1;
         d[SC_BUMP] = script_bump;
@@ -985,8 +1066,8 @@ fn init_stack(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Pro
 
     // ── Stack ──
     let clock = Clock::get()?;
-    create_pda(creator, stack_ai, system, STACK_SIZE, program_id, &[STACK_SEED, mint.key.as_ref(), &[stack_bump]])?;
-    let mut d = stack_ai.try_borrow_mut_data()?;
+    create_pda(creator, stack_ai, STACK_SIZE, program_id, &[STACK_SEED, mint.address().as_ref(), &[stack_bump]])?;
+    let mut d = stack_ai.try_borrow_mut()?;
     d[..8].copy_from_slice(&STACK_DISC);
     d[S_VERSION] = 1;
     d[S_BUMP] = stack_bump;
@@ -994,9 +1075,9 @@ fn init_stack(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Pro
     d[S_SLOT_COUNT] = n as u8;
     d[13] = meta_bump;
     d[14] = script_bump;
-    d[S_MINT..S_MINT + 32].copy_from_slice(mint.key.as_ref());
-    d[S_CREATOR..S_CREATOR + 32].copy_from_slice(creator.key.as_ref());
-    d[S_POOL..S_POOL + 32].copy_from_slice(pool.key.as_ref());
+    d[S_MINT..S_MINT + 32].copy_from_slice(mint.address().as_ref());
+    d[S_CREATOR..S_CREATOR + 32].copy_from_slice(creator.address().as_ref());
+    d[S_POOL..S_POOL + 32].copy_from_slice(pool.address().as_ref());
     d[S_BASE_VAULT..S_BASE_VAULT + 32].copy_from_slice(base_vault.as_ref());
     if let Some((pk, author)) = parent {
         d[S_PARENT_STACK..S_PARENT_STACK + 32].copy_from_slice(pk.as_ref());
@@ -1022,7 +1103,8 @@ fn init_stack(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Pro
     d[S_LAST_SQRT..S_LAST_SQRT + 16].copy_from_slice(&sqrt.to_le_bytes());
     d[S_THRESHOLD..S_THRESHOLD + 8].copy_from_slice(&threshold.to_le_bytes());
     d[S_ACTIVATION_POINT..S_ACTIVATION_POINT + 8].copy_from_slice(&activation_point.to_le_bytes());
-    msg!("hookrz stack armed: {} slots, flags {}", n, flags);
+    log("hookrz stack armed (slots, flags)");
+    log_64(n as u64, flags as u64, 0, 0, 0);
     Ok(())
 }
 
@@ -1031,14 +1113,14 @@ fn init_stack(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Pro
 /// mint, DBC pool, stack (PDA, must not exist yet), script (w, PDA), system program.
 /// Data: total_len u16 · offset u16 · bytes. The staged script (version 0) is never run; init_stack
 /// with data flag bit 1 verifies and seals it (version 1), after which it can't change.
-fn write_script(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> ProgramResult {
+fn write_script(program_id: &Pubkey, accounts: &mut [AccountView], args: &[u8]) -> ProgramResult {
     let [creator, mint, pool, stack_ai, script_ai, system] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
-    if !creator.is_signer {
+    if !creator.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
     }
-    if system.key != &system_program::ID {
+    if system.address() != &SYSTEM_PROGRAM {
         return Err(ProgramError::IncorrectProgramId);
     }
     if args.len() < 4 {
@@ -1050,38 +1132,38 @@ fn write_script(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> P
     if !(1..=MAX_SCRIPT).contains(&total) || offset + bytes.len() > total {
         return Err(ProgramError::InvalidInstructionData);
     }
-    if mint.owner != &TOKEN_2022 || pool.owner != &DBC_PROGRAM {
+    if !mint.owned_by(&TOKEN_2022) || !pool.owned_by(&DBC_PROGRAM) {
         return Err(ProgramError::IllegalOwner);
     }
-    if !matches!(mint_hook(&mint.try_borrow_data()?), Some((_, p)) if p == program_id.to_bytes()) {
+    if !matches!(mint_hook(&mint.try_borrow()?), Some((_, p)) if p == program_id.to_bytes()) {
         return Err(ProgramError::InvalidAccountData);
     }
     {
-        let d = pool.try_borrow_data()?;
+        let d = pool.try_borrow()?;
         if d.len() < POOL_SQRT_PRICE + 16
             || d[..8] != DBC_HOOK_POOL_DISC
-            || key_at(&d, POOL_BASE_MINT) != mint.key.as_ref()
-            || key_at(&d, POOL_CREATOR) != creator.key.as_ref()
+            || key_at(&d, POOL_BASE_MINT) != mint.address().as_ref()
+            || key_at(&d, POOL_CREATOR) != creator.address().as_ref()
         {
             return Err(ProgramError::InvalidAccountData);
         }
     }
-    let (stack_key, _) = Pubkey::find_program_address(&[STACK_SEED, mint.key.as_ref()], program_id);
-    let (script_key, script_bump) = Pubkey::find_program_address(&[SCRIPT_SEED, mint.key.as_ref()], program_id);
-    if stack_ai.key != &stack_key || script_ai.key != &script_key {
+    let (stack_key, _) = find_pda(&[STACK_SEED, mint.address().as_ref()], program_id);
+    let (script_key, script_bump) = find_pda(&[SCRIPT_SEED, mint.address().as_ref()], program_id);
+    if stack_ai.address() != &stack_key || script_ai.address() != &script_key {
         return Err(ProgramError::InvalidSeeds);
     }
-    if stack_ai.owner == program_id {
+    if stack_ai.owned_by(program_id) {
         return Err(refuse(EngineError::StackLocked as u32));
     }
-    if script_ai.owner != program_id {
-        create_pda(creator, script_ai, system, SCRIPT_SIZE, program_id, &[SCRIPT_SEED, mint.key.as_ref(), &[script_bump]])?;
-        let mut d = script_ai.try_borrow_mut_data()?;
+    if !script_ai.owned_by(program_id) {
+        create_pda(creator, script_ai, SCRIPT_SIZE, program_id, &[SCRIPT_SEED, mint.address().as_ref(), &[script_bump]])?;
+        let mut d = script_ai.try_borrow_mut()?;
         d[..8].copy_from_slice(&SCRIPT_DISC);
         d[SC_VERSION] = 0;
         d[SC_BUMP] = script_bump;
     }
-    let mut d = script_ai.try_borrow_mut_data()?;
+    let mut d = script_ai.try_borrow_mut()?;
     if d.len() < SCRIPT_SIZE || d[..8] != SCRIPT_DISC || d[SC_VERSION] != 0 {
         return Err(refuse(EngineError::StackLocked as u32));
     }
@@ -1092,75 +1174,74 @@ fn write_script(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> P
 
 // ───────────────────────── open_wallet (anyone; idempotent; prepended to hookrz buys) ─────────────────────────
 /// Accounts: payer (signer, w), mint, token account, wallet record (w), system program.
-fn open_wallet(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn open_wallet(program_id: &Pubkey, accounts: &mut [AccountView]) -> ProgramResult {
     let [payer, mint, token_account, wallet, system] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
-    if !payer.is_signer {
+    if !payer.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
     }
-    if system.key != &system_program::ID {
+    if system.address() != &SYSTEM_PROGRAM {
         return Err(ProgramError::IncorrectProgramId);
     }
-    if token_account.owner != &TOKEN_2022 || mint.owner != &TOKEN_2022 || !token_account_of(&token_account.try_borrow_data()?, mint.key) {
+    if !token_account.owned_by(&TOKEN_2022) || !mint.owned_by(&TOKEN_2022) || !token_account_of(&token_account.try_borrow()?, mint.address()) {
         return Err(ProgramError::InvalidAccountData);
     }
-    let (key, bump) = Pubkey::find_program_address(&[WALLET_SEED, mint.key.as_ref(), token_account.key.as_ref()], program_id);
-    if wallet.key != &key {
+    let (key, bump) = find_pda(&[WALLET_SEED, mint.address().as_ref(), token_account.address().as_ref()], program_id);
+    if wallet.address() != &key {
         return Err(ProgramError::InvalidSeeds);
     }
-    if wallet.owner == program_id {
+    if wallet.owned_by(program_id) {
         return Ok(());
     }
-    create_pda(payer, wallet, system, WALLET_SIZE, program_id, &[WALLET_SEED, mint.key.as_ref(), token_account.key.as_ref(), &[bump]])?;
-    let mut d = wallet.try_borrow_mut_data()?;
+    create_pda(payer, wallet, WALLET_SIZE, program_id, &[WALLET_SEED, mint.address().as_ref(), token_account.address().as_ref(), &[bump]])?;
+    let mut d = wallet.try_borrow_mut()?;
     d[..8].copy_from_slice(&WALLET_DISC);
     d[W_VERSION] = 1;
     d[W_BUMP] = bump;
-    d[W_MINT..W_MINT + 32].copy_from_slice(mint.key.as_ref());
-    d[W_TOKEN_ACCOUNT..W_TOKEN_ACCOUNT + 32].copy_from_slice(token_account.key.as_ref());
-    d[W_PAYER..W_PAYER + 32].copy_from_slice(payer.key.as_ref());
+    d[W_MINT..W_MINT + 32].copy_from_slice(mint.address().as_ref());
+    d[W_TOKEN_ACCOUNT..W_TOKEN_ACCOUNT + 32].copy_from_slice(token_account.address().as_ref());
+    d[W_PAYER..W_PAYER + 32].copy_from_slice(payer.address().as_ref());
     Ok(())
 }
 
 // ───────────────────────── close (after the hook is retired; anyone may crank) ─────────────────────────
 /// Retired = the mint still has its TransferHook extension (extensions can't be removed) but it
 /// no longer names this program. Anything else is live (S1: liveness comes from the mint).
-fn hook_retired(program_id: &Pubkey, mint: &AccountInfo) -> ProgramResult {
-    if mint.owner != &TOKEN_2022 {
+fn hook_retired(program_id: &Pubkey, mint: &AccountView) -> ProgramResult {
+    if !mint.owned_by(&TOKEN_2022) {
         return Err(ProgramError::IllegalOwner);
     }
-    match mint_hook(&mint.try_borrow_data()?) {
+    match mint_hook(&mint.try_borrow()?) {
         Some((_, p)) if p != program_id.to_bytes() => Ok(()),
         _ => {
-            msg!("The hook is live until the curve graduates");
+            log("The hook is live until the curve graduates");
             Err(refuse(EngineError::HookLive as u32))
         }
     }
 }
-fn close_into(target: &AccountInfo, recipient: &AccountInfo) -> ProgramResult {
+/// Move all lamports to `recipient`, then zero the account (data length, lamports and owner = System).
+fn close_into(target: &mut AccountView, recipient: &mut AccountView) -> ProgramResult {
     let lamports = target.lamports();
-    **recipient.try_borrow_mut_lamports()? = recipient.lamports().checked_add(lamports).ok_or(ProgramError::ArithmeticOverflow)?;
-    **target.try_borrow_mut_lamports()? = 0;
-    target.resize(0)?;
-    target.assign(&system_program::ID);
-    Ok(())
+    recipient.set_lamports(recipient.lamports().checked_add(lamports).ok_or(ProgramError::ArithmeticOverflow)?);
+    target.set_lamports(0);
+    target.close()
 }
 /// Accounts: wallet record (w), mint, rent payer recorded at open (w).
-fn close_wallet(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn close_wallet(program_id: &Pubkey, accounts: &mut [AccountView]) -> ProgramResult {
     let [wallet, mint, recipient] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
-    if wallet.owner != program_id {
+    if !wallet.owned_by(program_id) {
         return Err(ProgramError::IllegalOwner);
     }
     {
-        let d = wallet.try_borrow_data()?;
-        if d.len() < WALLET_SIZE || d[..8] != WALLET_DISC || key_at(&d, W_MINT) != mint.key.as_ref() {
+        let d = wallet.try_borrow()?;
+        if d.len() < WALLET_SIZE || d[..8] != WALLET_DISC || key_at(&d, W_MINT) != mint.address().as_ref() {
             return Err(ProgramError::InvalidAccountData);
         }
-        if key_at(&d, W_PAYER) != recipient.key.as_ref() {
-            msg!("Rent goes back to the payer that opened the record");
+        if key_at(&d, W_PAYER) != recipient.address().as_ref() {
+            log("Rent goes back to the payer that opened the record");
             return Err(ProgramError::InvalidAccountData);
         }
     }
@@ -1168,37 +1249,37 @@ fn close_wallet(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult 
     close_into(wallet, recipient)
 }
 /// Accounts: stack (w), extra-account-metas (w), script (w), mint, pool creator (w).
-fn close_stack(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn close_stack(program_id: &Pubkey, accounts: &mut [AccountView]) -> ProgramResult {
     let [stack_ai, meta_list, script_ai, mint, recipient] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
-    if stack_ai.owner != program_id {
+    if !stack_ai.owned_by(program_id) {
         return Err(ProgramError::IllegalOwner);
     }
     let has_script = {
-        let d = stack_ai.try_borrow_data()?;
-        if d.len() < STACK_SIZE || d[..8] != STACK_DISC || key_at(&d, S_MINT) != mint.key.as_ref() {
+        let d = stack_ai.try_borrow()?;
+        if d.len() < STACK_SIZE || d[..8] != STACK_DISC || key_at(&d, S_MINT) != mint.address().as_ref() {
             return Err(ProgramError::InvalidAccountData);
         }
         // S2: rent goes to the creator recorded on-chain at init.
-        if key_at(&d, S_CREATOR) != recipient.key.as_ref() {
+        if key_at(&d, S_CREATOR) != recipient.address().as_ref() {
             return Err(ProgramError::InvalidAccountData);
         }
         let flags = u16::from_le_bytes(rd(&d, S_FLAGS));
-        if flags & F_SCRIPT != 0 && key_at(&d, S_SCRIPT) != script_ai.key.as_ref() {
+        if flags & F_SCRIPT != 0 && key_at(&d, S_SCRIPT) != script_ai.address().as_ref() {
             return Err(ProgramError::InvalidAccountData);
         }
         flags & F_SCRIPT != 0
     };
-    let (meta_key, _) = Pubkey::find_program_address(&[EXTRA_METAS_SEED, mint.key.as_ref()], program_id);
-    if meta_list.key != &meta_key {
+    let (meta_key, _) = find_pda(&[EXTRA_METAS_SEED, mint.address().as_ref()], program_id);
+    if meta_list.address() != &meta_key {
         return Err(ProgramError::InvalidSeeds);
     }
     hook_retired(program_id, mint)?;
-    if meta_list.owner == program_id {
+    if meta_list.owned_by(program_id) {
         close_into(meta_list, recipient)?;
     }
-    if has_script && script_ai.owner == program_id {
+    if has_script && script_ai.owned_by(program_id) {
         close_into(script_ai, recipient)?;
     }
     close_into(stack_ai, recipient)
@@ -1206,21 +1287,22 @@ fn close_stack(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
 
 // ───────────────────────── helpers ─────────────────────────
 /// Create a PDA; M1: a pre-funded address is topped up, then allocated and assigned.
-fn create_pda<'a>(payer: &AccountInfo<'a>, target: &AccountInfo<'a>, system: &AccountInfo<'a>, size: usize, owner: &Pubkey, seeds: &[&[u8]]) -> ProgramResult {
-    let rent = Rent::get()?.minimum_balance(size);
+/// `seeds` (≤ 4, bump included) sign for the PDA.
+fn create_pda(payer: &AccountView, target: &AccountView, size: usize, owner: &Address, seeds: &[&[u8]]) -> ProgramResult {
+    let rent = Rent::get()?.try_minimum_balance(size)?;
+    let n = seeds.len().min(4);
+    let seed = |i: usize| CpiSeed::from(if i < n { seeds[i] } else { &[][..] });
+    let all = [seed(0), seed(1), seed(2), seed(3)];
+    let signer = [Signer::from(&all[..n])];
     if target.lamports() == 0 {
-        return invoke_signed(
-            &system_instruction::create_account(payer.key, target.key, rent, size as u64, owner),
-            &[payer.clone(), target.clone(), system.clone()],
-            &[seeds],
-        );
+        return CreateAccount { from: payer, to: target, lamports: rent, space: size as u64, owner }.invoke_signed(&signer);
     }
     let need = rent.saturating_sub(target.lamports());
     if need > 0 {
-        invoke(&system_instruction::transfer(payer.key, target.key, need), &[payer.clone(), target.clone(), system.clone()])?;
+        Transfer { from: payer, to: target, lamports: need }.invoke()?;
     }
-    invoke_signed(&system_instruction::allocate(target.key, size as u64), &[target.clone(), system.clone()], &[seeds])?;
-    invoke_signed(&system_instruction::assign(target.key, owner), &[target.clone(), system.clone()], &[seeds])
+    Allocate { account: target, space: size as u64 }.invoke_signed(&signer)?;
+    Assign { account: target, owner }.invoke_signed(&signer)
 }
 
 enum Seed<'a> {
@@ -1273,12 +1355,12 @@ mod tests {
     }
     #[test]
     fn token_accounts_must_hold_this_mint() {
-        let mint = Pubkey::new_unique();
+        let mint = Address::new_from_array([7u8; 32]);
         let mut d = vec![0u8; 170];
         d[..32].copy_from_slice(mint.as_ref());
         d[165] = 2;
         assert!(token_account_of(&d, &mint));
-        assert!(!token_account_of(&d, &Pubkey::new_unique()));
+        assert!(!token_account_of(&d, &Address::new_from_array([8u8; 32])));
         d[165] = 1; // a mint, not an account
         assert!(!token_account_of(&d, &mint));
     }

@@ -1,10 +1,11 @@
 # hookrz_engine status
 
-_Updated 2026-10-04 19:50._
+_Updated 2026-10-04 20:20._
 
 - **Program id (local fork):** `EiZ3npNmrPCkAjskdMR7RDJQcojC9p8CHNr1dR4DPxKr`. The keypair `program-keypair.json` is local only
   (gitignored: a public keypair would let anyone deploy to the address first). Use a fresh one for devnet/mainnet.
-- **.so:** `target/sbpf-solana-solana/release/hookrz_engine.so` (latest build) and `hookrz_engine.so` + `.sha256` (last stable copy; Hookscript VM linked).
+- **.so:** `hookrz_engine.so` + `.sha256` is the stable, **stripped** deployable (145,704 bytes ≈ 0.74 SOL of rent at
+  5,080 lamports/byte). `target/sbpf-solana-solana/release/hookrz_engine.so` is the latest unstripped build (~180 KB, same code).
 - **Instruction data, accounts, params, layouts:** `LAYOUT.md`. JS encoder/decoder: `js/layout.mjs` (BACKEND wraps it in `server/src/layout.ts`).
 
 ## Done (steps 1–5)
@@ -18,8 +19,7 @@ _Updated 2026-10-04 19:50._
    blocks (→ 6128, reason text in the log), globals and wallet vars persist on Allow. Script account layout from
    hookscript/SPEC.md §8. Wallet record grew to 328 bytes with the fields SPEC.md §8 asked for (bought, sold, buys, sells,
    last_buy_ts, outflow lots). Scripts too big for the launch tx are staged with `write_script` (0xA4) and sealed by init_stack.
-5. CU measured in LiteSVM (below): worst case **13,424 CU** (budget 30,000): the five heaviest blocks plus the compiled
-   `hot-potato.hs` refusing a sell with its formatted reason. The heaviest transfer that lands is 12,782 CU.
+5. CU measured in LiteSVM (below): worst case **13,481 CU** (budget 30,000), on the pinocchio build.
 
 Final VM (19:50): linked against HOOKSCRIPT's calibrated VM (gas includes the `450 + 30 × reasons` setup charge, cap 8,000).
 The engine API use was already final: `verify` at init_stack, `Refuse { reason_id, arg }` → `format_reason(code, id, arg)` in
@@ -56,6 +56,33 @@ Sandwich Guard send taint, close paths (6142, then refunds), M1 pre-funded PDAs,
 vars), staged scripts, a script reading the DBC fee, and the compiled king-of-the-hill.hs and hot-potato.hs examples. BACKEND's e2e
 (`server/tests/e2e-fork.test.ts`) runs the engine against the real DBC binary (launch, refusals, graduation, close).
 
+## Deploy size (20:20)
+Goal: ≤ 148,000 bytes deployed without dropping features. Done: **145,704 bytes** stripped, every feature and test kept.
+
+| Step | .so bytes (unstripped / stripped) |
+|---|---:|
+| Before: solana-program, `msg!` formatting, its default panic handler | 284,368 / – |
+| 1. No `core::fmt` on chain: static log strings + `sol_log_64` for numbers, a silent panic handler | 268,360 / 225,296 |
+| 2. pinocchio 0.11 + pinocchio-system (zero-copy entrypoint, `no_std`, no allocator, non-formatting panic handler) | 192,552 / 168,672 |
+| 3. One non-generic `create_pda`; no 128-bit division in the engine (u64 maths for the fee base and curve progress) | – / 166,592 |
+| 4. `opt-level = "z"` for everything | 177,888 / 142,368 (but wallet-record CU ×2.5) |
+| 5. **Final:** engine at `opt-level = 3`, dependencies (VM, pinocchio) at `"z"`; ASCII-only log text (no UTF-8 validator) | – / **145,704** |
+| (for reference) the same without the Hookscript VM (`--no-default-features`) | – / 86,800 |
+
+What's in the 145,704: ~58 KB is the Hookscript VM (run, verify/analyze at init, window sums, clock/moon/daylight maths),
+~12 KB the 12 blocks, the rest the engine (Execute, init_stack, wallet records, CPIs) and ~5 KB of core's panic-message
+plumbing (bounds-check panics reference number Display even though the handler never formats; removing that needs
+`build-std` with `panic_immediate_abort`, which the platform-tools toolchain doesn't offer). The VM's `format_reason` is no
+longer called on chain, so it isn't linked. Overflow checks stay on.
+
+Deploy the stripped file: `llvm-objcopy --strip-all target/sbpf-solana-solana/release/hookrz_engine.so hookrz_engine.so`
+(`cargo build-sbf` strips the same way).
+
+Log change (for the indexer): a Hookscript refusal now logs the reason's template unformatted plus a numbers line (see
+LAYOUT.md, Execute). `server/src/service.ts explain()` takes the text after `Hookscript: ` as the message, so it will show
+`{}` where the value goes; BACKEND should fill it with the TS `format_reason` from the numbers line (or from its own quote).
+All error codes and the `Error Code: … Error Number: …` lines are unchanged.
+
 ## Changes BACKEND should know
 - Wallet record is **328 bytes** (was 224); `js/layout.mjs` decodeWallet reads the new fields.
 - A Custom slot adds the pool and both wallet records to the meta list; a script with the APP flag (header byte 3 & 0x08)
@@ -75,62 +102,61 @@ vars), staged scripts, a script reading the DBC fee, and the compiled king-of-th
 - With the calibrated VM, real CU stays under the script's `gas_max` (heavy: gas 7,725, ~5,000 CU of VM time on top of the
   empty-script cost).
 
-## CU (LiteSVM, engine's own Execute CU from the program log)
+## CU (LiteSVM, engine's own Execute CU from the program log; pinocchio build)
 Each block alone, on a passing transfer with history (5 receipt lots, a prior sell, a linear sniper-fee schedule).
-"marginal" = max over kinds minus the base.
+"marginal" = max over kinds minus the base. The pinocchio entrypoint halved the base cost (was ~2,650).
 
 | Block | buy | sell | send | marginal |
 |---|---:|---:|---:|---:|
-| engine base (dispatch, C1 checks, Stack, classification; 1 trivial slot) | 2,671 | 2,661 | 2,643 | |
-| snipe-shield | 2,681 | 2,656 | 2,648 | 10 |
-| anti-bundle | 2,729 | 2,684 | 2,676 | 58 |
-| max-wallet | 2,774 | 2,652 | 2,756 | 113 |
-| rising-max | 2,960 | 2,650 | 2,943 | 300 |
-| sandwich-guard (loads + writes wallet records) | 4,078 | 4,147 | 5,002 | 2,359 |
-| sell-cap | 2,662 | 2,763 | 2,644 | 102 |
-| sell-cooldown (wallet records) | 4,077 | 4,151 | 5,001 | 2,358 |
-| hold-timer (wallet records + lots) | 4,109 | 4,241 | 5,145 | 2,502 |
-| circuit-breaker (pool read + slot state) | 4,433 | 4,425 | 3,303 | 1,764 |
-| trading-hours | 2,671 | 2,661 | 2,643 | 0 |
-| lock-in (pool read) | 2,985 | 3,086 | 2,967 | 425 |
-| creator-vest (slot state) | 2,696 | 2,686 | 2,678 | 35 |
-| custom: empty script (pool + wallets + VM fixed cost) | 5,504 | 5,539 | 6,490 | 3,847 |
-| custom: fee gate (reads price, progress, DBC fee) | 8,137 | 7,840 | 8,791 | 6,148 |
-| custom: hand-assembled KotH | 6,593 | 6,439 | 7,165 | 4,522 |
-| custom: heavy (gas_max 7,725, 15 window sums) | 9,952 | 10,086 | 11,440 | 8,797 |
-
-Wallet-record blocks share their cost: the records are loaded and written once per transfer, however many blocks use them.
-A script with the CURVE flag adds ~2,300 CU (u128 price, progress and fee maths).
+| engine base (dispatch, C1 checks, Stack, classification; 1 trivial slot) | 1,209 | 1,211 | 1,195 | |
+| snipe-shield | 1,219 | 1,206 | 1,200 | 10 |
+| anti-bundle | 1,279 | 1,250 | 1,244 | 70 |
+| max-wallet | 1,312 | 1,202 | 1,308 | 113 |
+| rising-max | 1,498 | 1,200 | 1,495 | 300 |
+| sandwich-guard (loads + writes wallet records) | 2,188 | 2,270 | 3,164 | 1,969 |
+| sell-cap | 1,200 | 1,313 | 1,196 | 102 |
+| sell-cooldown (wallet records) | 2,187 | 2,274 | 3,163 | 1,968 |
+| hold-timer (wallet records + lots) | 2,219 | 2,364 | 3,307 | 2,112 |
+| circuit-breaker (pool read + slot state) | 2,780 | 2,784 | 1,670 | 1,573 |
+| trading-hours | 1,209 | 1,211 | 1,195 | 0 |
+| lock-in (pool read) | 1,324 | 1,437 | 1,320 | 226 |
+| creator-vest (slot state) | 1,249 | 1,251 | 1,245 | 50 |
+| custom: empty script (pool + wallets + VM fixed cost) | 3,693 | 3,742 | 5,090 | 3,895 |
+| custom: fee gate (reads price, progress, DBC fee) | 6,492 | 6,048 | 7,396 | 6,201 |
+| custom: hand-assembled KotH | 6,000 | 5,578 | 6,595 | 5,400 |
+| custom: heavy (gas_max 7,725, 15 window sums) | 10,060 | 10,216 | 11,975 | 10,780 |
 
 | Worst-case 6-slot stack | buy | sell | send |
 |---|---:|---:|---:|
-| hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + rising-max | 6,763 | 6,771 | 6,688 |
-| hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + anti-bundle + snipe-shield | 6,528 | 6,675 | 6,402 |
-| hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + custom (KotH) | 8,660 | 8,774 | 8,232 |
-| hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + custom (heavy) | 12,294 | 12,696 | 12,782 |
-| hold-timer + circuit-breaker + anti-bundle + rising-max + creator-vest + custom (heavy) | 12,642 | 12,535 | 13,096 |
+| hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + rising-max | 4,483 | 4,504 | 4,466 |
+| hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + anti-bundle + snipe-shield | 4,244 | 4,408 | 4,180 |
+| hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + custom (KotH) | 7,876 | 7,722 | 7,477 |
+| hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + custom (heavy) | 12,247 | 12,671 | 13,168 |
+| hold-timer + circuit-breaker + anti-bundle + rising-max + creator-vest + custom (heavy) | 12,590 | 12,509 | **13,481** |
 
-Compiled example scripts on their heaviest paths (`fork/cu.mjs`; refusals cost more because the reason is formatted and logged):
+Compiled example scripts on their heaviest paths (`fork/cu.mjs`):
 
 | Script, path | alone | + the 5 heavy blocks | verdict |
 |---|---:|---:|---|
-| hot-potato: buy catches the potato | 7,438 | 9,493 | ok |
-| hot-potato: send passes the potato | 9,217 | 10,262 | ok |
-| hot-potato: buy burns the holder and catches | 8,633 | 10,718 | ok |
-| hot-potato: burnt wallet's buy (reason with a duration) | 10,199 | 12,149 | 6128 |
-| hot-potato: holder's sell (reason with a duration) | 11,275 | **13,424** | 6128 |
-| king-of-the-hill: buy takes the crown | 8,271 | 10,326 | ok |
-| king-of-the-hill: buy outbids the faded bar | 8,399 | 10,439 | ok |
-| king-of-the-hill: king's send (reason with a duration) | 10,895 | 11,813 | 6128 |
-| king-of-the-hill: sell by a non-king | 6,339 | 8,616 | ok |
+| hot-potato: buy catches the potato | 7,880 | 9,744 | ok |
+| hot-potato: send passes the potato | 10,607 | 11,467 | ok |
+| hot-potato: buy burns the holder and catches | 10,337 | 12,231 | ok |
+| hot-potato: burnt wallet's buy | 8,156 | 9,903 | 6128 |
+| hot-potato: holder's sell | 8,856 | 10,803 | 6128 |
+| king-of-the-hill: buy takes the crown | 9,010 | 10,874 | ok |
+| king-of-the-hill: buy outbids the faded bar | 9,137 | 10,989 | ok |
+| king-of-the-hill: king's send | 8,234 | 8,950 | 6128 |
+| king-of-the-hill: sell by a non-king | 5,541 | 7,627 | ok |
 
-A script at the 8,000 gas cap that also reads the curve stays well under the budget (~15k CU). The whole `transfer_checked` (Token-2022 plus its
-extra-account resolution plus the engine) is 30k–55k CU in these runs, so swaps should set a compute-unit limit.
+Worst case: **13,481 CU** (budget 30,000). Refusals no longer format text, so they now cost less than the landing paths.
+The whole `transfer_checked` (Token-2022 plus its extra-account resolution plus the engine) is 32k–50k CU in these runs, so
+swaps should set a compute-unit limit.
 
 ## Build and test
 ```
 export PATH=$HOME/.cache/solana/v1.57/platform-tools/rust/bin:$HOME/.cache/solana/v1.57/platform-tools/llvm/bin:$PATH CARGO_HOME=$HOME/.cache/solana/cargo-home
 cargo build --release --target sbpf-solana-solana          # → target/sbpf-solana-solana/release/hookrz_engine.so (with the VM)
+llvm-objcopy --strip-all target/sbpf-solana-solana/release/hookrz_engine.so hookrz_engine.so   # the deployable (145,704 B)
 cargo build --release --target sbpf-solana-solana --no-default-features   # without the VM (refuses scripted stacks)
 cargo test --release                                       # host unit tests (11) + fixture verify + parity vectors (9,625)
 node vectors/gen.mjs                                       # regenerate vectors from web/src/engine (then cargo test)
@@ -145,4 +171,4 @@ cd fork && node cu.mjs                                     # CU table → fork/c
   the 8 engine.test.mjs cases). The generator dropped 2 circuit-breaker vectors where the float reference can't resolve 1 raw
   unit at the band edge.
 - Host unit tests: 11 pass, plus the fixture verify test. Fork tests: 17 pass at the default id and 17 at a random
-  address. `web` npm test: 8 pass. BACKEND `server` npm test: 16 pass.
+  address. `web` npm test: 8 pass. BACKEND `server` npm test: 17 pass on the stripped pinocchio .so.

@@ -157,39 +157,8 @@ export function sumHTML(S, c, curSig) {
     ${rules.length ? `<ul class="yr">${rules.map(({ s, r }) => `<li class="${r.own ? 'own' : ''}"><span class="yr-ic">${icon(r.family, 20)}</span><div><b>${esc(r.title)}</b><span>${esc(r.does)}</span></div></li>`).join('')}</ul>`
       : `<div class="sum-empty">${icon('lock', 28, { color: 'var(--text-3)', accent: 'var(--chrome-4)' })}<p>Pick a rulebook or write your own rule. What your coin will refuse shows up here.</p></div>`}
     ${probs.length ? `<ul class="sum-probs" role="alert">${probs.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}
-    ${rules.length ? quickHTML(S, curSig) : ''}
     <button class="btn btn-chrome btn-lg sum-next" data-act="step" data-to="2" data-fk="sum-next" ${rules.length ? '' : 'disabled'}>Next: name your coin ${ICON.arrow}</button>
     <button class="sum-adv" data-act="adv" data-fk="adv" aria-expanded="${!!S.view.adv}" aria-controls="adv">${S.view.adv ? 'Close customize' : 'Customize rules'}<span class="dim">${S.view.adv ? '' : `tune numbers, add any of the ${BLOCKS.length} rules`}</span><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="${S.view.adv ? 'M2.5 7.5 6 4l3.5 3.5' : 'M2.5 4.5 6 8l3.5-3.5'}"/></svg></button>
   </div>`;
 }
 
-// ───────────────────────── quick bot test ─────────────────────────
-function quickHTML(S, curSig) {
-  const { res, busy } = S.sim;
-  const stale = res && S.sim.sig !== curSig;
-  const btn = `<button class="btn btn-glass qt-go" data-act="sim" data-fk="qt-go" ${busy ? 'disabled' : ''}>${busy ? '<span class="spin" aria-hidden="true"></span>Running the bots…' : `${icon('bot', 18)}${res ? 'Test again' : `Test against ${CROWD} bots`}`}</button>`;
-  if (!res) return `<div class="qt">${btn}<p class="qt-sub dim">Snipers, bundlers, whales and holders trade your coin's first 6 hours, once with these rules and once without.</p>${S.sim.err ? `<p class="own-err">${esc(S.sim.err)}</p>` : ''}</div>`;
-  const a = res.withStack, z = res.noRules;
-  const blocked = a.botAttempts - a.botLanded;
-  const dip = (x) => `−${Math.round(x.maxDrawdown * 100)}%`;
-  return `<div class="qt has${stale ? ' stale' : ''}${busy ? ' busy' : ''}">
-    <div class="qt-k">
-      <div><span class="pixel">Bot trades blocked</span><b class="mono">${n(blocked)}<small>/${n(a.botAttempts)}</small></b><small>${z.botAttempts - z.botLanded ? `${n(z.botAttempts - z.botLanded)} without rules` : 'none without rules'}</small></div>
-      <div><span class="pixel">Worst dip</span><b class="mono">${dip(a)}</b><small>${dip(z)} without rules</small></div>
-    </div>
-    ${miniChart(a, z)}
-    <div class="qt-lg"><span><i class="you"></i>Your rules</span><span><i class="none"></i>No rules</span><span class="dim">Simulation · first 6h</span></div>
-    ${stale ? '<p class="qt-stale">Your rules changed since this test.</p>' : ''}
-    <div class="qt-foot">${btn}<button class="link" data-act="fullSim">Full simulation</button></div>
-  </div>`;
-}
-
-function miniChart(A, Z) {
-  const W = 300, H = 74, pad = 3;
-  const vals = [...A.series, ...Z.series].map((s) => s.p * SUPPLY);
-  const lo = Math.min(...vals), hi = Math.max(...vals), T = A.hours * 3600;
-  const x = (t) => pad + (t / T) * (W - pad * 2), y = (v) => pad + (1 - (v - lo) / (hi - lo || 1)) * (H - pad * 2);
-  const path = (ser) => ser.map((s, i) => `${i ? 'L' : 'M'}${x(s.t).toFixed(1)} ${y(s.p * SUPPLY).toFixed(1)}`).join('');
-  return `<svg class="qt-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Market cap over the first 6 hours, with your rules and with no rules">
-    <path class="none" d="${path(Z.series)}" vector-effect="non-scaling-stroke"/><path class="you" d="${path(A.series)}" vector-effect="non-scaling-stroke"/></svg>`;
-}

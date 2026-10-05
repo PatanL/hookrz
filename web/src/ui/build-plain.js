@@ -2,6 +2,7 @@
 // The advanced view (Customize) keeps the technical copy.
 import { PRESETS, byId } from '../data/blocks.js';
 import { titleOf } from './hs-editor.js';
+import { isAddress, shortAddr } from '../core/address.js';
 
 const pct = (v) => `${+(+v).toFixed(2)}%`;
 const secs = (s) => (s >= 120 && s % 60 === 0 ? `${s / 60} minutes` : s === 60 ? 'minute' : `${s} seconds`);
@@ -40,7 +41,7 @@ const PLAIN = {
   'creator-vest': (p) => ({ title: 'Creator vesting', does: `Your own launch buy unlocks slowly: nothing for ${p.cliff} day${p.cliff === 1 ? '' : 's'}, then evenly over ${p.days} days.`, refuses: `the creator selling a launch bag that hasn't unlocked yet` }),
   'holder-rewards': (p) => ({ title: 'Holder rewards', does: `${p.pct}% of your creator fees are paid out to holders every hour.`, refuses: null }),
   'first-buyer-rebate': (p) => ({ title: 'First-buyer rebate', does: `The first ${p.n} buyers who still hold at graduation split ${p.pct}% of your creator fees.`, refuses: null }),
-  tithe: (p) => ({ title: 'Tithe', does: `${p.pct}% of your creator fees go to a wallet you name, for good.`, refuses: null }),
+  tithe: (p) => ({ title: 'Tithe', does: `${p.pct}% of your creator fees go to ${p.to && isAddress(p.to) ? shortAddr(p.to) : 'a wallet you name'}, for good.`, refuses: null }),
   'lp-lock': (p) => ({ title: 'Liquidity locked', does: `${p.pct}% of the liquidity is locked forever when the coin graduates.`, refuses: null }),
   // crown
   'token-gate': (p) => ({ title: 'Holders only', does: `Only wallets holding at least ${big(p.min)} ${p.ticker} can buy or receive it.`, refuses: `buys from wallets holding less than ${big(p.min)} ${p.ticker}` }),

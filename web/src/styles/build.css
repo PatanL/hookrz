@@ -843,6 +843,38 @@ button.ls:hover { color: var(--text); }
 .c2-earn { display: flex; gap: 8px; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 13px; color: var(--text-2); }
 .c2-earn b { color: var(--up); }
 .c2-earn .px-icon { color: var(--ice); flex: none; }
+/* fee split for coins whose rules spend fees (Tithe, Holder Rewards, Sniper Fee → Burn, …) */
+.c2-split { margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+.c2-sh { font-family: var(--font-pixel); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-2); }
+.c2-bar { display: flex; gap: 2px; height: 8px; }
+.c2-bar i { display: block; min-width: 3px; }
+.c2-bar .you, .c2-who .you i { background: var(--up); }
+.c2-bar .rule, .c2-who .rule i { background: var(--ice); }
+.c2-bar .hz, .c2-who .hz i { background: var(--chrome-4); }
+.c2-bar .mt, .c2-who .mt i { background: var(--line); }
+.c2-who { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+.c2-who li { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 9px; align-items: center; font-size: 13.5px; color: var(--text-2); }
+.c2-who li i { width: 8px; height: 8px; }
+.c2-who li span { min-width: 0; overflow-wrap: anywhere; }
+.c2-who li b { font-weight: 500; color: var(--text); }
+.c2-who li.you span, .c2-who li.you b { color: var(--text); font-weight: 650; }
+.c2-who li.you b { color: var(--up); }
+.c2-note { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--text-3); }
+/* "Before you launch": the Tithe's wallet and the launch lists */
+.rv-set { display: grid; gap: 14px; }
+.rv-set .rv-h { margin-bottom: 0; }
+.rv-set .field { display: grid; gap: 6px; }
+.rv-set .field label { font-weight: 600; font-size: 14px; }
+.rv-set .field .dim { font-weight: 400; }
+.rv-set .input.mono { font-size: 13px; }
+.xa { resize: vertical; min-height: 76px; line-height: 1.5; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+.xlim { margin: 0; font-size: 12.5px; color: var(--text-3); }
+.xlim.bad { color: var(--refuse); }
+.rv-need { display: flex; gap: 8px; align-items: center; margin: 0; font-size: 13px; color: var(--warn); }
+.rv-need[hidden] { display: none; }
+.rv-need .px-icon { flex: none; transform: rotate(-90deg); }
+.prm-addr { display: grid; gap: 6px; }
+.prm-addr .input { width: 100%; font-size: 12.5px; }
 .rv2-side .wbox { padding: 12px 14px; gap: 12px; }
 .rv2-side .wb-ico { width: 34px; height: 34px; }
 .rv-go { width: 100%; }

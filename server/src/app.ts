@@ -34,7 +34,12 @@ export function buildApp(svc: Hookrz, o: { info?: any } = {}) {
   const hits = new Map<string, { n: number; t: number }>();
   const limit = (key: string, max: number) => {
     const now = Date.now(), h = hits.get(key);
-    if (!h || now - h.t > 60_000) { hits.set(key, { n: 1, t: now }); if (hits.size > 50_000) hits.clear(); return false; }
+    if (!h || now - h.t > 60_000) {
+      hits.set(key, { n: 1, t: now });
+      // evict windows that already expired (never live counters, so rotating IPs can't reset anyone's limit)
+      if (hits.size > 50_000) for (const [k, v] of hits) if (now - v.t > 60_000) hits.delete(k);
+      return false;
+    }
     return ++h.n > max;
   };
   app.addHook("onRequest", async (req, reply) => {

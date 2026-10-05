@@ -7,6 +7,8 @@ import { api } from '../api/client.js';
 import { FEES } from '../api/contract.js';
 import { byId, ENGINE } from '../data/blocks.js';
 import { budget, evaluate, feeAt, largestAllowed, normalize } from '../engine/engine.js';
+import { splitView } from '../engine/fees.js';
+import { isAddress, parseAddresses, shortAddr } from '../core/address.js';
 import { Curve, SUPPLY } from '../engine/sim.js';
 import { connect, pick, onWallet, address } from '../wallet/wallet.js';
 import { ICON } from './icons.js';
@@ -23,6 +25,9 @@ const short = (k) => (k ? `${k.slice(0, 4)}…${k.slice(-4)}` : '');
 const normUrl = (u) => (/^https?:\/\//i.test(u) ? u : `https://${u}`);
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 const sol = (x) => `${x < 0.1 ? +x.toFixed(3) : +x.toFixed(2)} SOL`;
+/** Blocklist marks and Allowlist passes that fit in the launch transaction beside a creator buy. */
+export const LAUNCH_MARKS = 3;
+const pctOf = (x) => `${+x.toFixed(3)}%`;
 const famIcons = (st, size = 18) => st.map((s) => `<span title="${esc(plainRule(s).title)}">${pixelIcon(byId[s.id].family, { size })}</span>`).join('');
 
 export function validate(m) {
@@ -60,11 +65,39 @@ export function creatorBuyCheck(stack, solIn) {
 }
 
 /**
+ * What some rules need before launch, beyond their numbers: the wallet a Tithe pays, and the wallets a Blocklist
+ * blocks or an Allowlist Phase lets in from the first second (written in the launch transaction).
+ * → { tithe, block, pass, errs{ to, block, pass, marks }, marks[{ owner, blocked?, pass? }], owners, ok, needs }
+ */
+export function launchExtras(stack, meta, creator = null) {
+  const tithe = stack.find((s) => s.id === 'tithe') ?? null;
+  const blk = stack.find((s) => s.id === 'blocklist') ?? null;
+  const al = stack.find((s) => s.id === 'allowlist-phase') ?? null;
+  const errs = {};
+  if (tithe) {
+    const to = String(tithe.params.to ?? '').trim();
+    if (!to) errs.to = 'Name the wallet the tithe pays.';
+    else if (!isAddress(to)) errs.to = 'That isn\'t a Solana wallet address.';
+  }
+  const block = blk ? parseAddresses(meta.block) : { list: [], bad: [] };
+  const pass = al ? parseAddresses(meta.pass) : { list: [], bad: [] };
+  const badList = (b) => (b.bad.length ? `${b.bad.length === 1 ? `“${b.bad[0].slice(0, 24)}${b.bad[0].length > 24 ? '…' : ''}” isn't` : `${b.bad.length} entries aren't`} a Solana wallet address.` : null);
+  if (badList(block)) errs.block = badList(block);
+  else if (creator && block.list.includes(creator)) errs.block = 'That\'s your own wallet. You can\'t block yourself.';
+  if (badList(pass)) errs.pass = badList(pass);
+  const owners = [...new Set([...block.list, ...pass.list])];
+  if (owners.length > LAUNCH_MARKS) errs.marks = `${owners.length} wallets: ${LAUNCH_MARKS} fit in the launch. ${blk?.params.lockAt === 'immediately' && block.list.length ? 'Your blocklist freezes at launch, so keep the ones that matter most.' : 'Add the rest from your coin page after launch.'}`;
+  const marks = [...block.list.map((owner) => ({ owner, blocked: true })), ...pass.list.map((owner) => ({ owner, pass: true }))];
+  return { tithe, block: blk, pass: al, errs, marks, owners: owners.length, ok: !Object.keys(errs).length, needs: !!(tithe || blk || al) };
+}
+
+/**
  * go(step): the page's step change (steps 2 and 3 live here). onReset: "Launch another coin".
  */
 export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft, toast, go, onReset }) {
   const L = S.launch;
-  let addr = address, handle = null, prepT = null, prepBusy = false, prepFail = false;
+  let addr = address, handle = null, prepT = null, prepBusy = false, prepFail = false, prepErr = null;
+  const extras = () => launchExtras(plain(), L.meta, addr);
   onWallet((a) => { addr = a; if (!a) handle = null; if (S.view.step === 3 && !L.busy && !L.done) render(); });
 
   function render() {
@@ -145,15 +178,15 @@ export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft
 
   // ───── step 3: review and launch
   function reviewHTML(c) {
-    const m = L.meta, st = plain(), P = L.prep, busy = L.busy, err = L.err;
-    if ((!P || L.prepSig !== prepKey()) && !prepFail) queuePrep();
+    const m = L.meta, st = plain(), busy = L.busy, err = L.err, xo = extras();
+    if (xo.ok && (!L.prep || L.prepSig !== prepKey()) && !prepFail) queuePrep();
+    const P = xo.ok && L.prepSig === prepKey() ? L.prep : null; // never show (or sign) a launch built for other settings
     const buy = +m.buy || 0;
     const links = [m.x && ['X', m.x], m.tg && ['Telegram', m.tg], m.web && ['Website', m.web]].filter(Boolean);
     const rules = S.stack.map((s) => plainRule(s));
     const refuse = rules.filter((r) => r.refuses), also = rules.filter((r) => !r.refuses);
     const launchSol = P ? P.rentSol + P.launchCostSol + NET_FEE : budget(st).rentSol + FEES.launchCostSol + NET_FEE;
-    const creatorPct = (FEES.tradeFeePct * (FEES.split.find((f) => /creator/i.test(f.who))?.pct ?? 0)) / 100;
-    const ready = P && c.ok && !busy;
+    const ready = P && c.ok && xo.ok && !busy;
     return `<div class="l-h"><h2>Review and launch</h2><p class="dim">Check it, connect your wallet, sign. Your rules switch on before anyone else can trade.</p></div>
     <div class="rv2">
       <div class="rv2-main panel">
@@ -166,17 +199,20 @@ export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft
           ${also.length ? `<div class="rv-h also"><span class="pixel">It will also</span></div><ul class="rv-say also">${also.map((r) => `<li>${pixelIcon(r.family, { size: 14 })}<span>${esc(r.does)}</span></li>`).join('')}</ul>` : ''}
           ${S.parent ? `<p class="rv-remix dim">${ICON.remix}Remix of <a href="coin.html?t=${encodeURIComponent(S.parent.ticker)}">$${esc(S.parent.ticker)}</a>: your coin page links back to it.</p>` : ''}
         </div>
+        ${xo.needs ? `<div class="rv-sec rv-set" data-x-sec>${extrasHTML(xo)}</div>` : ''}
       </div>
       <aside class="rv2-side">
         <div class="rv-card cost2">
           <div class="c2-row"><span>Launch cost</span><b class="mono">${P ? '' : '~'}${sol(launchSol)}</b></div>
           ${buy ? `<div class="c2-row"><span>Your first buy</span><b class="mono">${sol(buy)}</b></div><div class="c2-row tot"><span>Total</span><b class="mono">${sol(launchSol + buy)}</b></div>` : ''}
-          <p class="c2-earn">${pixelIcon('flow', { size: 14 })}<span>You earn <b>${+creatorPct.toFixed(2)}%</b> of every trade on your coin.</span></p>
+          <div data-split>${splitHTML(P)}</div>
         </div>
         <div class="wbox${addr ? ' on' : ''}">
           ${addr ? `<span class="dot"></span><div><span class="dim">Your wallet${handle ? ` · ${esc(handle.name)}` : ''}</span><b class="mono">${esc(short(addr))}</b></div><button class="btn btn-ghost btn-sm" data-l="switch" data-fk="l-switch">Switch</button>`
             : `<span class="wb-ico">${pixelIcon('lock', { size: 18 })}</span><div><b>Connect your wallet</b><span class="dim">Phantom, Solflare, Backpack or any Solana wallet.</span></div><button class="btn btn-glass btn-sm" data-l="connect" data-fk="l-connect">Connect</button>`}
         </div>
+        ${prepErr && !busy ? `<div class="sg-err fail" role="alert"><b>Couldn't build the launch</b><span>${esc(prepErr)}</span><button class="btn btn-glass btn-sm" data-l="reprep">Try again</button></div>` : ''}
+        ${xo.needs && !busy ? `<p class="rv-need" data-x-need ${xo.ok ? 'hidden' : ''}>${pixelIcon('arrow', { size: 14 })}<span>${esc(xo.ok ? '' : needLine(xo))}</span></p>` : ''}
         <button class="btn btn-chrome btn-lg rv-go" data-l="sign" data-fk="l-sign" ${ready ? '' : 'disabled'}>${busy === 'wallet' ? '<span class="spin"></span>Approve in your wallet…' : busy === 'submit' ? '<span class="spin"></span>Launching…' : err?.kind === 'rejected' ? 'Try again' : addr ? 'Sign and launch' : 'Connect and launch'}${busy ? '' : ICON.arrow}</button>
         ${busy ? `<ol class="mini-flow"><li class="${busy === 'wallet' ? 'now' : 'done'}">Sign</li><li class="${busy === 'submit' ? 'now' : ''}">Launch</li><li>Live</li></ol>` : '<p class="rv-note dim">Your wallet asks you to approve. hookrz never holds your keys.</p>'}
         ${err ? `<div class="sg-err ${err.kind}" role="alert"><b>${esc(err.title)}</b><span>${esc(err.text)}</span>${err.kind === 'nosign' ? '<button class="btn btn-glass btn-sm" data-l="switch">Use another wallet</button>' : ''}</div>` : ''}
@@ -187,6 +223,59 @@ export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft
     <div class="lp-foot"><button class="btn btn-ghost" data-act="step" data-to="2" ${busy ? 'disabled' : ''}>Back</button></div>`;
   }
 
+  /** "Before you launch": the Tithe's wallet, and the wallets to block or let in from the first second. */
+  function extrasHTML(xo) {
+    const m = L.meta, e = { ...xo.errs };
+    if (xo.tithe && !String(xo.tithe.params.to ?? '').trim()) delete e.to; // an empty field gets its hint; the line by the button says what's missing
+    const fld = (k, label, input, hint) => `<div class="field xf${e[k] ? ' bad' : ''}" data-xf="${k}"><label for="lx-${k}">${label}</label>${input}<span class="${e[k] ? 'ferr' : 'fhint'}" data-xmsg="${k}"${e[k] ? ' role="alert"' : ''}>${esc(e[k] ?? hint)}</span></div>`;
+    const area = (k, ph) => `<textarea class="input mono xa" id="lx-${k}" data-x="${k}" data-fk="lx-${k}" rows="3" spellcheck="false" autocomplete="off" placeholder="${ph}" ${e[k] ? 'aria-invalid="true"' : ''}>${esc(m[k] ?? '')}</textarea>`;
+    const lock = xo.block?.params.lockAt;
+    const blockHint = lock === 'immediately' ? 'One address per line. Your blocklist freezes at launch, so these are the whole list.'
+      : `One address per line. You can add or remove wallets from your coin page until the list freezes ${lock === 'after 24h' ? '24 hours after launch' : 'at graduation'}.`;
+    const tithePct = xo.tithe?.params.pct;
+    return `<div class="rv-h"><span class="pixel">Before you launch</span></div>
+      ${xo.tithe ? fld('to', 'Send the tithe to', `<input class="input mono" id="lx-to" data-x="to" data-fk="lx-to" value="${esc(xo.tithe.params.to ?? '')}" placeholder="Solana wallet address" spellcheck="false" autocomplete="off" ${e.to ? 'aria-invalid="true"' : ''}>`, `This wallet gets ${tithePct}% of your creator fees, for good. It can't change after launch.`) : ''}
+      ${xo.block ? fld('block', 'Wallets to block <span class="dim">(optional)</span>', area('block', 'One wallet address per line'), blockHint) : ''}
+      ${xo.pass ? fld('pass', 'Wallets with a pass <span class="dim">(optional)</span>', area('pass', 'One wallet address per line'), `Only these wallets can buy in the first ${xo.pass.params.minutes} minutes. You can give more passes from your coin page any time.`) : ''}
+      ${xo.block || xo.pass ? `<p class="xlim${e.marks ? ' bad' : ''}" data-xmsg="marks"${e.marks ? ' role="alert"' : ''}>${esc(e.marks ?? `${xo.owners ? `${xo.owners} of the ${LAUNCH_MARKS} wallets` : `Up to ${LAUNCH_MARKS} wallets`} that fit in the launch${xo.block && xo.pass ? ', blocked and passes together' : ''}.${lock === 'immediately' && !xo.pass ? '' : ' Add more from your coin page after launch.'}`)}</p>` : ''}`;
+  }
+  function needLine(xo) {
+    const e = xo.errs;
+    if (e.to) return xo.tithe.params.to ? 'Fix the tithe wallet above to launch.' : 'Name the wallet the tithe pays, above, to launch.';
+    if (e.marks) return `Keep it to ${LAUNCH_MARKS} wallets at launch.`;
+    return 'Fix the wallet addresses above to launch.';
+  }
+
+  /** Who gets what of every trade: the launch's own fee split (the server's, once it built the launch). */
+  function splitHTML(P) {
+    const st = plain();
+    const abi = S.stack.find((s) => s.id === 'custom')?.draft?.compile?.abi ?? null;
+    const v = splitView(st, { abi, tradeFeePct: FEES.tradeFeePct, split: P?.curve?.feeSplit ?? null });
+    const earn = (pct, extra = '') => `<p class="c2-earn">${pixelIcon('flow', { size: 14 })}<span>You earn <b>${pctOf(pct)}</b> of every trade on your coin${extra}.</span></p>`;
+    if (!v.keeper) return earn(v.creatorPct);
+    const nameOf = (r) => {
+      const slot = S.stack.find((s) => s.id === r.id);
+      const t = slot ? plainRule(slot).title : r.label;
+      return r.id === 'tithe' && r.to && isAddress(r.to) ? `${t} → ${shortAddr(r.to)}` : t;
+    };
+    const rows = [
+      { k: 'you', t: 'You', pct: v.creatorPct },
+      ...v.rules.map((r) => ({ k: 'rule', t: nameOf(r), pct: r.pct })),
+      { k: 'hz', t: 'hookrz', pct: v.platformPct },
+      { k: 'mt', t: 'Meteora (the curve)', pct: v.protocolPct },
+    ];
+    const total = rows.reduce((a, r) => a + r.pct, 0) || 1;
+    const sn = v.sniper;
+    return `<div class="c2-split">
+      <div class="c2-sh"><span>Every trade pays ${FEES.tradeFeePct}%</span></div>
+      <div class="c2-bar" aria-hidden="true">${rows.filter((r) => r.pct > 0).map((r) => `<i class="${r.k}" style="flex:${r.pct / total}"></i>`).join('')}</div>
+      <ul class="c2-who">${rows.map((r) => `<li class="${r.k}"><i></i><span>${esc(r.t)}</span><b class="mono">${pctOf(r.pct)}</b></li>`).join('')}</ul>
+      ${v.rules.length ? `<p class="c2-note">Your rules get ${+v.shareOfCreatorPct.toFixed(2)}% of your half. hookrz's keeper pays and burns for them, and every step is a public transaction.</p>` : ''}
+      ${v.lpForRulesPct > 0 ? `<p class="c2-note">After graduation, ${v.lpForRulesPct}% of the pool is locked to fund your rules.</p>` : ''}
+      ${sn ? `<p class="c2-note">The launch fee above ${sn.endPct}% is burned, so the keeper pays you your share.</p>` : ''}
+    </div>`;
+  }
+
   /** Everything technical about the launch, folded away: rules with their settings, the instructions, size, cost lines, fee split, the manifest. */
   function techHTML(P, st, buy) {
     const ixs = P?.instructions ?? [];
@@ -194,7 +283,7 @@ export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft
     return `<div class="tech">
       <div class="rv-sec"><div class="rv-h"><span class="pixel">Rules, in run order</span><span class="mono dim">${norm.length}/${ENGINE.maxSlots}</span></div>
         <ol class="rv-stack">${norm.map((s, i) => { const b = byId[s.id]; return `<li><span class="mono dim">${String(i + 1).padStart(2, '0')}</span>${pixelIcon(b.family, { size: 20 })}<span class="rv-b"><b>${b.name}</b><span class="mono">${esc(summaryOf(s))}</span></span><span class="rv-e">${enfBadges(b)}</span></li>`; }).join('')}</ol></div>
-      <div class="rv-sec"><div class="rv-h"><span class="pixel">Launch transaction</span><span class="mono dim">${P ? `${ixs.length} instructions · one transaction · ${P.txBytes.toLocaleString('en-US')} / ${P.txLimit.toLocaleString('en-US')} bytes` : 'Building…'}</span></div>
+      <div class="rv-sec"><div class="rv-h"><span class="pixel">Launch transaction</span><span class="mono dim">${P ? `${ixs.length} instructions · ${P.transactions?.length > 1 ? `${P.transactions.length} transactions` : 'one transaction'} · ${P.txBytes.toLocaleString('en-US')} / ${P.txLimit.toLocaleString('en-US')} bytes` : extras().ok ? 'Building…' : 'Built once the settings above are filled in'}</span></div>
         ${P ? `<ol class="ixs">${ixs.map((x, i) => { const skip = /optional/.test(x.ix) && !buy; return `<li class="${skip ? 'skip' : ''}"><span class="ix-n mono">${i + 1}</span><div><div class="ix-top"><span class="chip">${esc(x.program)}</span><code class="mono">${esc(x.ix.replace(' (optional)', ''))}</code>${skip ? '<span class="dim ix-s">not included: no first buy</span>' : /optional/.test(x.ix) ? `<span class="mono ix-s">${buy} SOL</span>` : ''}</div><p>${esc(x.note)}</p></div></li>`; }).join('')}</ol>` : '<div class="skel"><i></i><i></i><i></i></div>'}</div>
       ${P ? `<div class="tech-grid">
         <div class="rv-card"><div class="sub pixel">Cost</div><dl class="cost">
@@ -206,6 +295,7 @@ export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft
           <p class="fhint">The rent comes back if the rules account is ever closed. Signers: ${P.signers.join(' + ')}.</p></div>
         <div class="rv-card"><div class="sub pixel">Fee split · ${FEES.tradeFeePct}% of every trade</div>
           <ul class="mini-fees">${FEES.split.map((f) => `<li><span>${esc(f.who)}</span><span class="mono">${f.pct}%</span><span class="to">${/creator/i.test(f.who) ? 'You' : esc(f.who)}</span></li>`).join('')}</ul>
+          ${P.curve?.feeSplit && P.curve.feeSplit.keeperShareBps + (P.curve.feeSplit.creatorTradingFeePercentage === 0 ? 1 : 0) > 0 ? `<p class="fhint">The pool's config: creator ${P.curve.feeSplit.creatorTradingFeePercentage}% of the fee after Meteora's cut, hookrz ${100 - P.curve.feeSplit.creatorTradingFeePercentage}% (the keeper's share included). After graduation: ${P.curve.feeSplit.partnerLockedLpPct}% of the pool locked for the rules, ${P.curve.feeSplit.creatorLockedLpPct}% locked for you, ${P.curve.feeSplit.creatorLpPct}% yours.</p>` : ''}
           <div class="mint-row"><span class="dim">Mint address</span><span class="mono">${esc(short(P.mint))}</span></div></div>
       </div>` : ''}
       <div class="manifest"><div class="rv-h"><span class="pixel">Launch manifest</span><span class="mono dim">what your wallet signs</span></div>
@@ -224,10 +314,17 @@ export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft
       'stack:',
       ...st.map((s, i) => `  ${i + 1}. ${s.id} ${JSON.stringify(s.id === 'custom' ? { prompt: s.params.prompt, hookscript: S.stack[i]?.draft?.compile?.ok ? `${S.stack[i].draft.compile.name ?? 'rule'}: ${S.stack[i].draft.compile.size} bytes, ${S.stack[i].draft.compile.cu} CU worst case` : null } : s.params)}`),
       ...(m.buy && +m.buy ? [`creator buy: ${+m.buy} SOL`] : []),
+      ...launchMarkLines(),
       ...(L.prep?.mint ? [`mint: ${L.prep.mint}`] : []),
       `issued: ${when}`,
     ];
     return lines.join('\n');
+  }
+
+  function launchMarkLines() {
+    const xo = extras();
+    const b = xo.marks.filter((x) => x.blocked).map((x) => x.owner), p = xo.marks.filter((x) => x.pass).map((x) => x.owner);
+    return [...(b.length ? [`blocked at launch: ${b.join(', ')}`] : []), ...(p.length ? [`passes at launch: ${p.join(', ')}`] : [])];
   }
 
   function doneHTML() {
@@ -251,16 +348,17 @@ export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft
   }
 
   // ───── behaviour
-  const prepKey = () => `${sig()}|${L.meta.buy}|${L.meta.ticker}`;
+  const prepKey = () => `${sig()}|${L.meta.buy}|${L.meta.ticker}|${JSON.stringify(extras().marks)}`;
   function queuePrep() {
     clearTimeout(prepT);
     prepT = setTimeout(async () => {
       const key = prepKey();
+      if (!extras().ok) return;
       try {
-        const P = await api.prepareLaunch({ meta: metaOut(), stack: plain(), creator: addr ?? undefined });
+        const P = await api.prepareLaunch({ meta: metaOut(), stack: plain(), creator: addr ?? undefined, marks: extras().marks });
         if (key !== prepKey()) return queuePrep();
-        L.prep = P; L.prepSig = key; prepFail = false;
-      } catch (e) { prepFail = true; toast(`Couldn't build the launch transaction: ${e?.message || 'try again'}`); }
+        L.prep = P; L.prepSig = key; prepFail = false; prepErr = null;
+      } catch (e) { if (key !== prepKey()) return queuePrep(); prepFail = true; prepErr = e?.message || 'The server didn\'t answer. Try again.'; }
       if (S.view.step === 3 && !L.done) render();
     }, 250);
   }
@@ -284,7 +382,7 @@ export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft
     if (S.view.step !== 2) return;
     if (!(await checkCoin())) { render(); root.querySelector('[aria-invalid="true"]')?.focus(); return; }
     if (!ctx().ok) { render(); root.querySelector('.blockers')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
-    L.prep = null; prepFail = false; L.err = null;
+    L.prep = null; prepFail = false; prepErr = null; L.err = null;
     go(3);
   }
 
@@ -299,7 +397,7 @@ export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft
 
   async function sign() {
     if (L.busy) return;
-    if (!ctx().ok) { render(); return; }
+    if (!ctx().ok || !extras().ok) { render(); return; }
     L.err = null;
     try { handle = await connect(); addr = address ?? addr; } catch { L.err = { kind: 'nowallet', title: 'No wallet connected', text: 'Connect a wallet to sign the launch. If you don\'t have one, the picker links to Phantom, Solflare and Backpack.' }; render(); return; }
     if (typeof handle?.signMessage !== 'function') { L.err = nosign(handle); render(); return; }
@@ -317,7 +415,7 @@ export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft
     }
     L.busy = 'submit'; render();
     try {
-      const r = await api.submitLaunch({ meta: metaOut(), stack: plain(), parent: S.parent?.ticker ?? null, prepared: { ...L.prep, manifest: text, manifestSignature: signature ? Array.from(signature) : null, creator: addr } });
+      const r = await api.submitLaunch({ meta: metaOut(), stack: plain(), parent: S.parent?.ticker ?? null, marks: extras().marks, prepared: { ...L.prep, manifest: text, manifestSignature: signature ? Array.from(signature) : null, creator: addr } });
       L.done = { ticker: r.ticker, signature: r.signature, name: L.meta.name.trim(), image: L.meta.image, mint: L.prep?.mint, creator: addr, stack: plain(), parent: S.parent?.ticker ?? null };
       clearDraft();
     } catch (e) {
@@ -348,16 +446,19 @@ export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft
     else if (a === 'connect') doConnect();
     else if (a === 'switch') doSwitch();
     else if (a === 'sign') sign();
+    else if (a === 'reprep') { prepFail = false; prepErr = null; L.prepSig = null; render(); }
     else if (a === 'noimg') { L.meta.image = null; save(); render(); }
     else if (a === 'maxbuy') { L.meta.buy = el.dataset.v; save(); render(); root.querySelector('#lf-buy')?.focus(); }
     else if (a === 'copy') {
       const link = el.dataset.link;
       (navigator.clipboard?.writeText(link) ?? Promise.reject()).then(() => toast('Link copied.'), () => toast(link));
-    } else if (a === 'again') { L.done = null; L.err = null; L.prep = null; L.errs = {}; L.meta = { name: '', ticker: '', desc: '', image: null, x: '', tg: '', web: '', buy: '' }; onReset(); }
+    } else if (a === 'again') { L.done = null; L.err = null; L.prep = null; L.errs = {}; L.meta = { name: '', ticker: '', desc: '', image: null, x: '', tg: '', web: '', buy: '', block: '', pass: '' }; onReset(); }
   });
   root.addEventListener('toggle', (e) => { if (e.target.matches?.('[data-l-more]')) S.view.txOpen = e.target.open; }, true);
   root.addEventListener('input', (e) => {
-    const el = e.target, k = el.dataset.f;
+    const el = e.target;
+    if (el.dataset.x) { extraInput(el); return; }
+    const k = el.dataset.f;
     if (!k) return;
     if (k === 'ticker') {
       const v = el.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
@@ -377,6 +478,37 @@ export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft
     const err = validate(L.meta)[k];
     if (err && !L.errs[k]) { L.errs[k] = err; const fld = e.target.closest('.field'); if (fld && !fld.querySelector('.ferr')) { fld.classList.add('bad'); fld.querySelector('.fhint')?.remove(); fld.insertAdjacentHTML('beforeend', `<span class="ferr" id="le-${k}" role="alert">${esc(err)}</span>`); e.target.setAttribute('aria-invalid', 'true'); } }
   });
+  /** A "Before you launch" field changed: keep the state, patch the messages and the button, rebuild the launch when it's complete. */
+  function extraInput(el) {
+    const k = el.dataset.x;
+    if (k === 'to') { const t = S.stack.find((s) => s.id === 'tithe'); if (!t) return; t.params.to = el.value.trim(); }
+    else L.meta[k] = el.value;
+    save();
+    patchExtras();
+  }
+  function patchExtras(touched = false) {
+    const xo = extras();
+    for (const k of ['to', 'block', 'pass', 'marks']) {
+      const msg = root.querySelector(`[data-xmsg="${k}"]`);
+      if (!msg) continue;
+      // while typing an address, a half-pasted one isn't an error yet: say so on blur (touched) or once it's long enough
+      const raw = k === 'to' ? String(xo.tithe?.params.to ?? '') : k === 'marks' ? '' : String(L.meta[k] ?? '');
+      const showErr = xo.errs[k] && (touched || k === 'marks' || raw.split(/[\s,;]+/).filter(Boolean).every((x) => x.length >= 32));
+      const fresh = document.createElement('div');
+      fresh.innerHTML = extrasHTML({ ...xo, errs: showErr ? xo.errs : { ...xo.errs, [k]: undefined } });
+      const nm = fresh.querySelector(`[data-xmsg="${k}"]`);
+      if (nm) { msg.className = nm.className; msg.textContent = nm.textContent; if (nm.hasAttribute('role')) msg.setAttribute('role', 'alert'); else msg.removeAttribute('role'); }
+      const f = root.querySelector(`[data-xf="${k}"]`);
+      if (f) { f.classList.toggle('bad', !!showErr); f.querySelector('[data-x]')?.toggleAttribute('aria-invalid', !!showErr); }
+    }
+    const need = root.querySelector('[data-x-need]'), btn = root.querySelector('[data-l="sign"]');
+    if (need) { need.hidden = xo.ok; need.querySelector('span').textContent = xo.ok ? '' : needLine(xo); }
+    const built = xo.ok && L.prep && L.prepSig === prepKey();
+    if (xo.ok && !built) { prepFail = false; prepErr = null; queuePrep(); }
+    if (btn && !built) btn.disabled = true; // enabled again once the launch for these settings is built
+    const sp = root.querySelector('[data-split]'); if (sp) sp.innerHTML = splitHTML(built ? L.prep : null);
+  }
+  root.addEventListener('focusout', (e) => { if (e.target.dataset?.x && S.view.step === 3) patchExtras(true); }, true);
   root.addEventListener('change', (e) => { if (e.target.id === 'lf-img') { readImage(e.target.files?.[0]); e.target.value = ''; } });
   root.addEventListener('dragover', (e) => { const d = e.target.closest('[data-drop]'); if (d && e.dataTransfer?.types?.includes('Files')) { e.preventDefault(); d.classList.add('over'); } });
   root.addEventListener('dragleave', (e) => { e.target.closest?.('[data-drop]')?.classList.remove('over'); });
@@ -393,7 +525,7 @@ export function createLaunch({ S, root, paint, plain, sig, ctx, save, clearDraft
         const bc = root.querySelector('[data-buycheck]'); if (bc) bc.innerHTML = buyCheckHTML();
         const c = ctx(), bl = root.querySelector('.blockers'), h = blockersHTML(c);
         if (bl && !h) bl.remove(); else if (bl) bl.outerHTML = h;
-      } else if (S.view.step === 3) { L.prep = null; prepFail = false; if (!L.busy) render(); }
+      } else if (S.view.step === 3) { L.prep = null; prepFail = false; prepErr = null; if (!L.busy) render(); }
     },
   };
 }

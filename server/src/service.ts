@@ -18,7 +18,8 @@ import type { HookProgram } from "./hook.js";
 import type { Store, CoinRow, TradeRow } from "./store.js";
 import { Keeper } from "./keeper.js";
 import { KEEPER_RULES, validateShares } from "./fees.js";
-import { BLOCK_IDS } from "./layout.js";
+import { BLOCK_IDS, stackMismatch } from "./layout.js";
+import { decodeScript } from "../../programs/hookrz-engine/js/layout.mjs";
 import { resolveGate, gateBalanceRaw, traderLists } from "./marks.js";
 
 const LAMPORTS = 1e9, RAW = 1e6;
@@ -102,13 +103,14 @@ export class Hookrz {
       return { owner, flags: (m.blocked ? 1 : 0) | (m.pass ? 2 : 0) };
     }).filter((m: any) => m.flags);
     const parent = body.parent ? this.store.findCoin(String(body.parent)) : null;
-    // Hookscript for a Custom block: { source } (compiled here) or { source, bytecode(base64) }.
-    let script = body.script ?? null;
+    // Hookscript for a Custom block: { source } only. Client bytecode is never used: the server compiles the source and
+    // runs the fuzz + honeypot gate itself (or drafts from the English prompt, which runs the same checks).
+    let script: any = null;
     if (stack.some((x: any) => x.id === "custom")) {
       // the site sends the source in the Custom slot's params (and as body.script); the server compiles it itself
       const slotSrc = stack.find((x: any) => x.id === "custom")?.params?.script;
-      if (!script?.source && slotSrc) script = { source: String(slotSrc) };
-      if (script?.source) script = { source: String(script.source) }; // never trust client bytecode: recompile
+      const src = body.script?.source ?? slotSrc;
+      if (src) script = { source: String(src) };
       // The site sends only the Custom block's English prompt: draft it (the drafter compiles and fuzzes every draft).
       const prompt = stack.find((x: any) => x.id === "custom")?.params?.prompt;
       if (!script && prompt) {
@@ -361,6 +363,11 @@ export class Hookrz {
       const stackAcc = this.hook && p.hookProgram ? await this.hook.readStack(this.chain, new PublicKey(mint)).catch(() => null) : null;
       if (p.hookProgram && this.hook?.kind === "hookrz" && !stackAcc) continue; // pool without its stack: not armed yet
       this.pending.delete(mint);
+      // The coin page shows the prepared rules: only list the coin if the chain enforces exactly those (and that script).
+      if (stackAcc && this.hook?.kind === "hookrz") {
+        const bad = stackMismatch(p.stack, stackAcc as any) ?? (await this.scriptMismatch(new PublicKey(mint), p.script, stackAcc as any));
+        if (bad) { console.warn(`not listing $${p.ticker} (${mint}): its on-chain rules differ from the prepared ones (${bad})`); continue; }
+      }
       const s = await snapshot(this.chain, new PublicKey(p.pool));
       this.store.upsertCoin({
         mint, ticker: p.ticker, name: p.name, desc: p.desc, image: p.image, links: p.links, creator: p.creator, pool: p.pool, config: p.config, base_vault: p.baseVault,
@@ -586,17 +593,31 @@ export class Hookrz {
   simulate(stack: any[], seed = 7) {
     return { withStack: runSim(stack ?? [], { seed }), noRules: runSim([], { seed }) };
   }
+  /** null if the on-chain Script holds exactly the prepared bytecode (or there is neither), else why not. */
+  private async scriptMismatch(mint: PublicKey, script: any, stackAcc: { script: string | null }) {
+    const want = script?.bytecode ? Buffer.from(String(script.bytecode), "base64") : null;
+    if (!want) return stackAcc.script ? "a script is armed on chain but none was prepared" : null;
+    const key = (this.hook as any).scriptPda?.(mint);
+    const { accounts: [a] } = key ? await this.chain.read([key]) : { accounts: [null] };
+    if (!a) return "the prepared script isn't on chain";
+    const code = Buffer.from(decodeScript(a.data).code);
+    return code.equals(want) ? null : "the script on chain differs from the prepared one";
+  }
   /** The launch gate for a hand-written or edited script: 10,000 fuzzed trades with zero errors, and the honeypot check. Cached per source. */
   private checks = new Map<string, { ok: boolean; message: string; report: any }>();
   scriptCheck(lib: any, source: string, code: Uint8Array) {
     const hit = this.checks.get(source);
     if (hit) return hit;
-    if (!lib?.fuzz) return { ok: true, message: "", report: null }; // fuzzer not available: the drafter path still checks
+    // fail closed: no fuzzer, no launch (not cached, so it recovers once the module loads)
+    if (!lib?.fuzz) return { ok: false, message: "The Hookscript safety check isn't available right now; try again in a minute", report: null };
     const { fuzz: z, honeypot: h } = lib.fuzz(code, { trades: 10_000, seed: 1, rust: false });
-    const ok = !z.errors && !z.panics && h.ok;
+    const b = z.byKind?.buy;
+    const dead = !!b && b.attempts >= 50 && b.refused / b.attempts >= 0.99;
+    const ok = !z.errors && !z.panics && h.ok && !dead;
     const message = ok ? "" : z.errors || z.panics
       ? `The Hookscript faulted on ${z.errors + z.panics} of ${z.trades} fuzzed trades`
-      : `The Hookscript failed the honeypot check: ${h.notes?.[0] ?? "some holders could never sell"}. Add a time-based way out.`;
+      : !h.ok ? `The Hookscript failed the honeypot check: ${h.notes?.[0] ?? "some holders could never sell"}. Add a time-based way out.`
+      : `The Hookscript refused ${Math.round((100 * b.refused) / b.attempts)}% of fuzzed buys: almost nobody could ever buy this coin.`;
     const r = { ok, message, report: { fuzz: z, honeypot: h } };
     this.checks.set(source, r);
     if (this.checks.size > 500) this.checks.delete(this.checks.keys().next().value!);

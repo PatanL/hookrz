@@ -17,6 +17,9 @@ import { mountStackPanel } from '../ui/coin-stackpanel.js';
 import { mountTicket } from '../ui/coin-ticket.js';
 import { mountFeed } from '../ui/coin-feed.js';
 import { pos, onPos } from '../ui/coin-position.js';
+import { mountKeeper } from '../ui/coin-keeper.js';
+import { mountMarks } from '../ui/coin-marks.js';
+import { splitView, PROTOCOL_PCT } from '../engine/fees.js';
 
 mountChrome('coins');
 installTips();
@@ -49,6 +52,9 @@ async function boot() {
   const risky = coin.stack.map((s) => ({ s, b: byId[s.id] })).filter(({ b }) => b.risk || b.power);
   const parent = coin.parent ? all.find((c) => c.ticker === coin.parent) : null;
   const children = all.filter((c) => c.parent === coin.ticker);
+  const split = splitView(coin.stack, { tradeFeePct: FEES.tradeFeePct });
+  const hasKeeper = split.keeper || !!coin.keeper;
+  const hasLists = coin.stack.some((s) => s.id === 'blocklist' || s.id === 'allowlist-phase');
 
   app.innerHTML = `
   <section class="cn-top">
@@ -115,6 +121,10 @@ async function boot() {
       <div class="panel cn-hold" id="holdP"></div>
       <div class="panel cn-fees" id="feesP"></div>
     </div>
+    ${hasKeeper || hasLists ? `<div class="wrap cn-grid4${hasKeeper && hasLists ? '' : ' one'}">
+      ${hasKeeper ? '<div class="panel cn-keep" id="keepP"></div>' : ''}
+      ${hasLists ? '<div class="panel cn-marks" id="marksP"></div>' : ''}
+    </div>` : ''}
   </section>`;
 
   const $ = (s) => app.querySelector(s);
@@ -156,7 +166,9 @@ async function boot() {
   mountFeed($('#feedP'), coin);
   renderLineage($('#linP'), coin, lineage, parent, children);
   renderHolders($('#holdP'), coin, holders);
-  renderFees($('#feesP'), coin);
+  renderFees($('#feesP'), coin, split);
+  if (hasKeeper) mountKeeper($('#keepP'), coin);
+  if (hasLists) mountMarks($('#marksP'), coin);
 }
 
 function riskLine(b, s, coin) {
@@ -221,16 +233,31 @@ function renderHolders(el, coin, holdersIn) {
     ${holders[0]?.creator ? `<p class="cn-hnote dim">Only the creator's launch buy so far. Wallets show up here as they buy $${esc(coin.ticker)}.</p>` : ''}`;
 }
 
-function renderFees(el, coin) {
+function renderFees(el, coin, v) {
   const fee24 = coin.vol24Usd * FEES.tradeFeePct / 100;
-  const tone = (who) => (who === 'Creator' ? 'cr' : 'pl');
   const line = (k, usdV, note = '', cls = '') => `<div class="fe-row ${cls}"><span class="fe-k">${k}${note ? `<small>${note}</small>` : ''}</span><span class="fe-v num">${sol(usdV / SOL_USD)}<small>${usd(usdV)}</small></span></div>`;
+  // a coin whose rules spend fees: the server's routing counts a Hookscript's payout lines too
+  const rulesShare = coin.keeper?.routing ? coin.keeper.routing.keeperShareOfCreatorPct : v.shareOfCreatorPct;
+  // % of the trading fee: Meteora keeps PROTOCOL_PCT first, the creator and hookrz split the rest 50/50
+  const half = (100 - PROTOCOL_PCT) / 2;
+  const pts = { creator: half * (1 - rulesShare / 100), rules: half * rulesShare / 100, hookrz: half, meteora: PROTOCOL_PCT };
+  const creatorNote = FEES.split.find((s) => s.who === 'Creator')?.note ?? '';
+  const segs = [
+    { k: 'cr', who: 'creator', pct: pts.creator, tip: `Creator: ${creatorNote}` },
+    ...(pts.rules > 0 ? [{ k: 'ru', who: 'rules', pct: pts.rules, tip: 'The coin\'s rules: burns, rewards and payouts the keeper makes from the creator\'s half' }] : []),
+    { k: 'pl', who: 'hookrz', pct: pts.hookrz, tip: `hookrz: ${FEES.split.find((s) => s.who !== 'Creator')?.note ?? ''}` },
+    { k: 'mt', who: 'Meteora', pct: pts.meteora, tip: 'Meteora: the bonding curve\'s own protocol fee, taken before the split' },
+  ];
+  const r2 = (x) => +x.toFixed(2);
   el.innerHTML = `
     <div class="ph"><h3>Fees <span class="pk">last 24h</span></h3><span class="dim num fe-tot">${sol(fee24 / SOL_USD)} in fees</span></div>
     <div class="fe-body">
-      <div class="fe-split">${FEES.split.map((s) => `<span class="fe-seg ${tone(s.who)}" style="flex:${s.pct}" data-tip="${esc(s.who)}: ${esc(s.note)}"><b>${s.pct}%</b>${esc(s.who === 'Creator' ? 'creator' : s.who)}</span>`).join('')}</div>
-      <p class="fe-note dim">Every trade pays a ${FEES.tradeFeePct}% fee, split ${FEES.split.length === 2 ? 'two' : FEES.split.length} ways.</p>
-      ${FEES.split.map((s) => line(s.who === 'Creator' ? `Creator ${esc(handleOf(coin))}` : esc(s.who), fee24 * s.pct / 100, s.who === 'Creator' ? `${s.pct}% of the fee` : `${s.pct}% of the fee · engine audits, keeper, API`, s.who === 'Creator' ? 'hi' : '')).join('')}
+      <div class="fe-split">${segs.map((s) => `<span class="fe-seg ${s.k}" style="flex:${s.pct}" data-tip="${esc(s.tip)}"><b>${r2(s.pct)}%</b>${s.who}</span>`).join('')}</div>
+      <p class="fe-note dim">Every trade pays a ${FEES.tradeFeePct}% fee, split ${['', '', 'two', 'three', 'four'][segs.length]} ways.${pts.rules > 0 ? ` The rules' part is ${r2(rulesShare)}% of the creator's half; see where it goes below.` : ' No rule on this coin spends its fees.'}</p>
+      ${line(`Creator ${esc(handleOf(coin))}`, fee24 * pts.creator / 100, `${r2(pts.creator)}% of the fee${v.creatorViaKeeper ? ' · paid out by the keeper' : ''}`, 'hi')}
+      ${pts.rules > 0 ? line('The coin\'s rules', fee24 * pts.rules / 100, `${r2(pts.rules)}% of the fee · burns, rewards, payouts`) : ''}
+      ${line('hookrz', fee24 * pts.hookrz / 100, `${pts.hookrz}% of the fee · engine audits, keeper, API`)}
+      ${line('Meteora', fee24 * pts.meteora / 100, `${pts.meteora}% of the fee · the curve's protocol fee`)}
     </div>`;
 }
 

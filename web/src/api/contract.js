@@ -29,7 +29,7 @@ export const ENDPOINTS = [
   { method: 'GET', path: '/v1/stacks', fn: 'stacks', group: 'Stacks', desc: 'Rulebooks ranked by how many coins reuse them.' },
   { method: 'GET', path: '/v1/stacks/:id/lineage', fn: 'lineage', group: 'Stacks', desc: 'The remix tree: parent, children and what changed in each remix.' },
   { method: 'POST', path: '/v1/hookscript/draft', fn: 'draftHookscript', group: 'Stacks', desc: 'English → Hookscript draft, compiled ops, CU estimate and fuzz results.' },
-  { method: 'POST', path: '/v1/launch/prepare', fn: 'prepareLaunch', group: 'Launch', desc: 'Unsigned launch transaction: mint + DBC pool + engine Stack + ExtraAccountMetaList (+ creator buy).' },
+  { method: 'POST', path: '/v1/launch/prepare', fn: 'prepareLaunch', group: 'Launch', desc: 'Unsigned launch transaction: mint + DBC pool + engine Stack + ExtraAccountMetaList (+ creator buy, + up to 3 Blocklist / Allowlist marks: body.marks [{ owner, blocked?, pass? }]). Returns the fee split the DBC config gets (curve.feeSplit). Tithe needs params.to, the address it pays.' },
   { method: 'POST', path: '/v1/launch/submit', fn: 'submitLaunch', group: 'Launch', desc: 'Relays the signed launch, waits for confirmation, indexes the coin.' },
   { method: 'GET', path: '/v1/creators/:wallet', fn: 'creator', group: 'Own', desc: 'A creator\'s coins, their rulebooks, and claimable creator fees.' },
   { method: 'POST', path: '/v1/fees/claim/prepare', fn: 'prepareClaim', group: 'Own', desc: 'Unsigned claim of creator fees from the curve pool.' },
@@ -37,6 +37,7 @@ export const ENDPOINTS = [
   { method: 'GET', path: '/v1/coins/:mint/keeper', fn: 'coinKeeper', group: 'Keeper', desc: 'The coin\'s fee routing and keeper ledger: claimed, kept, paid and burned per rule, what is still owed, and every claim, burn and payout with its transaction.' },
   { method: 'GET', path: '/v1/keeper', fn: 'keeper', group: 'Keeper', desc: 'The public keeper: its loop and platform key, every keeper coin\'s totals and the latest actions.' },
   { method: 'WS', path: '/v1/stream?mint=', fn: 'stream', group: 'Live', desc: 'Push stream of transfers and verdicts, curve ticks and keeper actions.' },
+  { method: 'GET', path: '/v1/health', fn: 'health', group: 'Live', desc: 'The network the API runs on, its slot and clock: the site links transactions to the matching explorer.' },
 ];
 
 /** The launch transaction, instruction by instruction (what /v1/launch/prepare returns, in order). */

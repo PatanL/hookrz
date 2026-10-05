@@ -11,7 +11,8 @@ import { byId, ENGINE, defaults } from '../data/blocks.js';
 import { budget, normalize } from '../engine/engine.js';
 import { api, diffStacks } from '../api/client.js';
 import { q } from '../core/format.js';
-import { remixBarHTML, paletteHTML, rackHTML, editorHTML } from '../ui/build-rack.js';
+import { remixBarHTML, paletteHTML, rackHTML, editorHTML, addressHint } from '../ui/build-rack.js';
+import { isAddress } from '../core/address.js';
 import { budgetHTML, pageWarnings } from '../ui/build-budget.js';
 import { simHTML, mountChart } from '../ui/build-sim.js';
 import { createLaunch } from '../ui/build-launch.js';
@@ -25,7 +26,12 @@ mountChrome('build');
 const KEY = 'hookrz:build-draft';
 let n = 0;
 const uid = () => `s${Date.now().toString(36)}${(n++).toString(36)}`;
-const slotOf = (id, params) => ({ uid: uid(), id, params: { ...defaults(id), ...(params ?? {}) }, draft: null });
+/** A slot with its defaults filled in; a setting outside the rule's current choices (an old draft, a remix) falls back to the default. */
+const slotOf = (id, params) => {
+  const p = { ...defaults(id), ...(params ?? {}) };
+  for (const d of byId[id]?.params ?? []) if (d.options && !d.options.includes(p[d.key])) p[d.key] = d.def;
+  return { uid: uid(), id, params: p, draft: null };
+};
 
 /** The whole page state. */
 export const S = {
@@ -47,7 +53,7 @@ export const S = {
     txOpen: false,        // "Transaction details" open
   },
   launch: {
-    meta: { name: '', ticker: '', desc: '', image: null, x: '', tg: '', web: '', buy: '' },
+    meta: { name: '', ticker: '', desc: '', image: null, x: '', tg: '', web: '', buy: '', block: '', pass: '' }, // block / pass: launch lists, one address per line
     errs: {}, prep: null, prepSig: null, busy: false, err: null, done: null,
   },
 };
@@ -114,8 +120,13 @@ const $ = (id) => document.getElementById(id);
 function paint(el, html) {
   const a = document.activeElement;
   const fk = a && el.contains(a) ? a.dataset.fk : null;
+  let sel = null;
+  try { if (fk && typeof a.selectionStart === 'number') sel = [a.selectionStart, a.selectionEnd, a.scrollTop]; } catch { /* inputs without a caret */ }
   el.innerHTML = html;
-  if (fk) el.querySelector(`[data-fk="${CSS.escape(fk)}"]`)?.focus({ preventScroll: true });
+  if (!fk) return;
+  const n = el.querySelector(`[data-fk="${CSS.escape(fk)}"]`);
+  n?.focus({ preventScroll: true });
+  if (n && sel) try { n.setSelectionRange(sel[0], sel[1]); n.scrollTop = sel[2]; } catch { /* the new element has no caret */ }
 }
 
 function ctx() {
@@ -415,7 +426,7 @@ const ACT = {
   preset: (el) => pickBook(el.dataset.id),
   empty: () => startEmpty(),
   undo: () => undo(),
-  reset: (el) => { const s = S.stack.find((x) => x.uid === el.dataset.uid); if (!s) return; snapshot(); s.params = { ...defaults(s.id), ...(s.id === 'custom' ? { prompt: s.params.prompt } : {}) }; changed(); },
+  reset: (el) => { const s = S.stack.find((x) => x.uid === el.dataset.uid); if (!s) return; snapshot(); s.params = { ...defaults(s.id), ...(s.id === 'custom' ? { prompt: s.params.prompt } : {}), ...(s.id === 'tithe' ? { to: s.params.to } : {}) }; changed(); },
   parentParams: (el) => { const s = S.stack.find((x) => x.uid === el.dataset.uid); const p = S.parent?.stack.find((x) => x.id === s?.id); if (!s || !p) return; snapshot(); s.params = { ...p.params }; changed(); },
   draft: (el) => draftScript(el.dataset.uid),
   write: (el) => { const s = S.stack.find((x) => x.uid === el.dataset.uid); if (!s) return; s.draft = { source: STARTER, prompt: (s.params.prompt ?? '').trim(), compile: null, check: null }; changed(); checkHs(s); $('editor').querySelector('textarea[data-hse]')?.focus(); },
@@ -457,11 +468,17 @@ app.addEventListener('input', (e) => {
     const par = el.closest('.prm')?.querySelector('.prm-parent');
     if (par) par.classList.toggle('diff', S.parent?.stack.find((x) => x.id === s.id)?.params[p.key] !== v);
   }
-  if (p.text) {
+  if (p.address) {
+    v = v.trim();
+    const msg = $('editor').querySelector(`[data-addr-msg="${p.key}"]`);
+    if (msg) { const bad = v.length >= 32 && !isAddress(v); msg.className = bad ? 'ferr' : 'fhint'; msg.textContent = bad ? "That isn't a Solana wallet address." : addressHint(s, p); }
+  } else if (p.text) {
     const st = $('editor').querySelector('.hs-stale');
     if (st) st.hidden = !s.draft?.prompt || s.draft.prompt === v.trim();
   }
   s.params[p.key] = v;
+  const hint = !p.address && $('editor').querySelector('[data-addr-msg].fhint');
+  if (hint) hint.textContent = addressHint(s, byId[s.id].params.find((x) => x.address));
   const msg = $('editor').querySelector('[data-errmsg]');
   if (msg && b.error) msg.textContent = b.error(s.params, {});
   changed({ editor: false });

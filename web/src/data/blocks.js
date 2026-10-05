@@ -269,7 +269,11 @@ export const BLOCKS = [
     id: 'tithe', code: null, family: 'flow', name: 'Tithe', enforcedBy: 'crank', state: 'none', route: 'any', cu: 0, accts: 0,
     tagline: 'A slice of fees goes to a wallet you name.',
     refuses: 'Nothing is refused. The keeper sends the chosen share of creator fees to a fixed address: a charity, a DAO, an artist. The address can\'t be changed after launch.',
-    params: [{ key: 'pct', label: 'Share of creator fees', min: 1, max: 50, step: 1, def: 10, fmt: (v) => `${v}%` }],
+    params: [
+      { key: 'pct', label: 'Share of creator fees', min: 1, max: 50, step: 1, def: 10, fmt: (v) => `${v}%` },
+      // the wallet the keeper pays (a Solana address, fixed at launch); the keeper's only, so it never reaches the engine
+      { key: 'to', label: 'Send the tithe to', text: true, address: true, def: '' },
+    ],
     summary: (p) => `${p.pct}% tithe`,
   },
   {
@@ -286,7 +290,7 @@ export const BLOCKS = [
     tagline: 'Only holders of another token can get in.',
     refuses: 'A buy or receive by a wallet holding less than the minimum of the gate token. The gate balance is read from the receiver\'s associated token account of the gate mint.',
     params: [
-      { key: 'ticker', label: 'Gate token', options: ['$BONK', '$WIF', '$JUP', '$HOOKRZ'], def: '$BONK' },
+      { key: 'ticker', label: 'Gate token', options: ['$BONK', '$WIF', '$JUP'], def: '$BONK' },
       { key: 'min', label: 'Minimum held', min: 1, max: 1000000, step: 1, def: 100000, fmt: (v) => `${(+v).toLocaleString('en-US')}` },
     ],
     summary: (p) => `holds ${shortNum(p.min)} ${p.ticker}`,

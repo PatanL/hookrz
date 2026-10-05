@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, unpackMint } from "@solana/spl-token";
 import { boot } from "../src/boot.js";
+import { forkFundGate, gateMints } from "../src/marks.js";
 import { buildApp } from "../src/app.js";
 import { signB64, type Hookrz } from "../src/service.js";
 import { snapshot, tokenBalance } from "../src/market.js";
@@ -182,6 +183,22 @@ test("buyback-burn, tithe, holder-rewards and diamond-tiers: claim, split, burn 
   const all = (await app.inject({ method: "GET", url: "/v1/keeper" })).json();
   assert.ok(all.coins.some((x: any) => x.ticker === "KEEP"));
   assert.ok(all.actions.length > 0);
+});
+
+test("claims work on coins whose hook accounts derive from owners (Blocklist, Allowlist Phase, Token Gate)", async () => {
+  const cr = wallet(), guest = wallet(2);
+  forkFundGate(chain, new PublicKey(gateMints()["$BONK"]), cr.publicKey, 1_000n * 100_000n);
+  const C = await launch(cr, "KMRK", [
+    { id: "blocklist", params: { lockAt: "at graduation" } },
+    { id: "allowlist-phase", params: { minutes: 5 } },
+    { id: "token-gate", params: { ticker: "$BONK", min: 100 } },
+    { id: "tithe", params: { pct: 10, to: guest.publicKey.toBase58() } },
+  ], 0.5);
+  assert.ok((await partnerPending(C.pool)) > 0n, "the creator's launch buy paid fees");
+  await svc.keeper.tick({ force: true });
+  const claims = actions(C.mint).filter((a) => a.kind === "claim");
+  assert.ok(claims.length && claims.every((a) => a.ok), `claim landed: ${JSON.stringify(claims.map((a) => a.detail))}`);
+  assert.equal(await partnerPending(C.pool), 0n, "the partner fee vault was emptied");
 });
 
 test("keeper failures never block trading", async () => {

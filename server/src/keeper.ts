@@ -12,7 +12,7 @@
 // and nothing here runs inside the indexer queue.
 import { PublicKey, Transaction, SystemProgram, ComputeBudgetProgram, type TransactionInstruction } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, createBurnCheckedInstruction, getAssociatedTokenAddressSync, unpackMint } from "@solana/spl-token";
-import { deriveDbcPoolAuthority, deriveDammV2PoolAuthority, derivePositionNftAccount, getBaseFeeHandler, TradeDirection } from "@meteora-ag/dynamic-bonding-curve-sdk";
+import { deriveDbcPoolAuthority, deriveDammV2PoolAuthority, derivePositionNftAccount, getBaseFeeHandler, TradeDirection, AccountsType } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { getUnClaimLpFee } from "@meteora-ag/cp-amm-sdk";
 import BN from "bn.js";
 import { normalize } from "../../web/src/engine/engine.js";
@@ -20,6 +20,7 @@ import { snapshot, buildSwap, buildMigration, rawQuote, tokenBalance, envelope, 
 import { curveFeatures, INCINERATOR, BASE_DECIMALS } from "./curve.js";
 import { feeRouting, allocateCurve, allocateLp, PROTOCOL_PCT, type Routing, type Share } from "./fees.js";
 import { decodeWallet } from "./layout.js";
+import type { HookrzEngine } from "./hook.js";
 import { customCode, type TxRecord } from "./chain.js";
 import type { CoinRow } from "./store.js";
 import type { Hookrz } from "./service.js";
@@ -264,7 +265,16 @@ export class Keeper {
     if (!due) return;
     const { dbc } = sdk(this.svc.chain);
     const me = this.svc.platform.publicKey;
-    const tx: Transaction = await dbc.partner.claimPartnerTradingFee2({ feeClaimer: me, payer: me, pool: s.pool, maxBaseAmount: new BN(0), maxQuoteAmount: U64_MAX, receiver: me });
+    // The claim's base leg (0 tokens) still runs the transfer hook. Blocklist / Allowlist marks and the Token Gate ATA
+    // derive from account owners, which the SDK resolves with dummy keys: rebuild them from the Stack (as buildSwap does).
+    const hook = this.svc.hook;
+    const offline = hook?.kind === "hookrz" && s.hookProgram && hook.id.equals(s.hookProgram)
+      ? await (hook as HookrzEngine).extrasFromStack(this.svc.chain, s.mint, s.baseVault, getAssociatedTokenAddressSync(s.mint, me, true, TOKEN_2022_PROGRAM_ID), deriveDbcPoolAuthority(), me, true)
+      : null;
+    const partner = offline
+      ? Object.assign(Object.create(dbc.partner), { getRemainingAccountsForTransferHook: async () => ({ info: { slices: [{ accountsType: AccountsType.TransferHookBase, length: offline.length }] }, accounts: offline }) })
+      : dbc.partner;
+    const tx: Transaction = await partner.claimPartnerTradingFee2({ feeClaimer: me, payer: me, pool: s.pool, maxBaseAmount: new BN(0), maxQuoteAmount: U64_MAX, receiver: me });
     const r = await this.send(tx, 300_000);
     if (!r.ok) return this.action(c.mint, { kind: "claim", rule: null, ok: false, sig: r.signature, detail: { source: "dbc", error: r.error, logs: r.logs.slice(-4) } });
     const claimed = -vaultDelta(r, s.quoteVault.toBase58()) || pending;

@@ -104,6 +104,17 @@ export function decodeStack(d: Buffer): StackAccount {
     gate: (() => { const g = E.gateOf(s); return g && g.mint ? { mint: b58(g.mint), minRaw: g.minRaw } : null; })(),
   };
 }
+/** Does the on-chain Stack enforce exactly the prepared hook blocks (ids and packed params, in slot order)? A reason, or null.
+ *  init_stack is creator-signed, so a creator could prepare one rule set (shown on the site) and arm another. */
+export function stackMismatch(prepared: any[], onchain: Pick<StackAccount, "slots">): string | null {
+  const want = hookSlots(prepared).map((s) => ({ id: BLOCK_IDS[s.id], params: Buffer.from(E.packParams(s.id, s.params)).toString("hex") }));
+  if (want.length !== onchain.slots.length) return `${onchain.slots.length} rules on chain, ${want.length} prepared`;
+  for (let i = 0; i < want.length; i++) {
+    if (want[i].id !== onchain.slots[i].blockId) return `rule ${i + 1} is ${blockName(onchain.slots[i].blockId)} on chain`;
+    if (want[i].params !== onchain.slots[i].params) return `rule ${i + 1} (${blockName(want[i].id)}) has different settings on chain`;
+  }
+  return null;
+}
 /** A decoded mark: flags plus the owner it belongs to. */
 export function decodeMark(d: Buffer) {
   const x = E.decodeMark(d);

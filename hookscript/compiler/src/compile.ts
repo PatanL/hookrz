@@ -578,7 +578,7 @@ class Checker {
         if (f === 'is_creator' || f === 'is_dev') return { k: 'keq', a: [K.CTX, view.key], b: [K.CTX, KC.CREATOR], ty: BOOL };
         const wf = WFIELDS[f];
         if (wf) {
-          if (V2_FIELDS.has(wf[0])) { this.usesV2 = true; this.warn(`${p0}.${f} needs the Wallet record's buy/sell counters (engine v2); until the engine fills them it reads 0`, pos); }
+          if (V2_FIELDS.has(wf[0])) this.usesV2 = true; // filled by hookrz_engine from the Wallet record's counters
           return { k: 'wal', side: view.side, f: wf[0], ty: wf[1] };
         }
         if (f === 'received' || f === 'sent' || f === 'sold_in') this.err(`${p0}.${f} needs a window`, pos, `Write ${p0}.${f}(window: 1h).`);
@@ -727,7 +727,7 @@ class Checker {
       const dir = f === 'received' || f === 'bought_in' || f === 'in' ? 0 : f === 'sent' || f === 'sold' || f === 'out' || f === 'sold_in' ? 1 : -1;
       if (dir >= 0) {
         const w = this.numArg(args, 'window', 0, pos, 'a duration like 1h', ['in', 'within', 'last', 'over']);
-        if (dir === 1) { this.usesV2 = true; this.warn(`${p0}.${f}(window:) needs the Wallet record's outflow lots (engine v2); until the engine fills them it reads 0`, pos); }
+        if (dir === 1) this.usesV2 = true; // outflow lots, filled by hookrz_engine
         return { k: 'win', side: view.side, dir, w, ty: NUM('tok') };
       }
     }
@@ -1049,7 +1049,8 @@ export function compile(src: string): CompileResult {
   let info: Info;
   try { info = analyzeNoLimit(s); } catch (e) {
     const code2 = (e as { code?: string }).code ?? String(e);
-    return { ok: false, errors: [{ message: code2 === 'StackOverflow' ? 'An expression is too deeply nested' : `Internal: ${code2}`, line: 1, col: 1 }], warnings: ck.warnings };
+    const msg = code2 === 'StackOverflow' ? 'An expression is too deeply nested (stack limit 32)' : code2 === 'TooManyLabels' ? 'Too many nested conditions (more than 64 open branches)' : `Internal: ${code2}`;
+    return { ok: false, errors: [{ message: msg, line: 1, col: 1, hint: 'Split the condition into separate refuse statements.' }], warnings: ck.warnings };
   }
   if (info.gasMax > GAS_LIMIT) return { ok: false, errors: [{ message: `Worst case costs ${info.gasMax.toLocaleString('en-US')} CU; the limit is ${GAS_LIMIT.toLocaleString('en-US')}`, line: 1, col: 1, hint: 'Clock, moon, daylight and decay reads are the expensive ones: read each once into a let.' }], warnings: ck.warnings };
   s[3] = info.flags;

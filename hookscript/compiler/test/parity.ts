@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { compile } from '../src/compile.ts';
 import { run, analyze, verify, formatReasonBytes } from '../src/interp.ts';
 import { encodeCtx, decodeCtx, CTX_BYTES, type Ctx } from '../src/ctx.ts';
-import { toHex, fromHex } from '../src/bytecode.ts';
+import { toHex, fromHex, OP, varint } from '../src/bytecode.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const VM = join(ROOT, 'vm');
@@ -111,6 +111,66 @@ export function corpusFromScripts(scripts: Uint8Array[], n: number, seed = 7): s
   return lines;
 }
 
+/** Stack-aware random programs with mostly valid operands (deep coverage of every op). */
+export function structuredScripts(n: number, seed = 99): Uint8Array[] {
+  const r = rng(seed);
+  const out: Uint8Array[] = [];
+  const small = () => r.int(4);
+  for (let k = 0; k < n; k++) {
+    const code: number[] = [];
+    let depth = 0;
+    const len = 5 + r.int(60);
+    for (let i = 0; i < len; i++) {
+      const pick = r.int(40);
+      const bin = [OP.ADD, OP.SUB, OP.MUL, OP.DIV, OP.MOD, OP.MIN, OP.MAX, OP.EQ, OP.NE, OP.LT, OP.LE, OP.GT, OP.GE];
+      const table: [number, number, number][] = [
+        [OP.PUSHI, 0, 1], [OP.PUSHR, 0, 1], [OP.PUSHR, 0, 1], [OP.PUSHI, 0, 1], [OP.PUSHR, 0, 1], [OP.PUSHI, 0, 1],
+        [OP.CTX, 0, 1], [OP.WAL, 0, 1], [OP.WIN, 1, 1], [OP.CLOCK, 0, 1], [OP.DAYLIGHT, 0, 1], [OP.MOON, 0, 1], [OP.DECAY, 4, 1],
+        [OP.RINGTICK, 0, 0], [OP.RINGAT, 0, 1], [OP.LDG, 0, 1], [OP.STG, 1, 0], [OP.LDW, 0, 1], [OP.STW, 1, 0], [OP.KEQ, 0, 1],
+        [OP.KSTG, 0, 0], [OP.KSTW, 0, 0], [OP.LDL, 0, 1], [OP.STL, 1, 0], [OP.DUP, 1, 2], [OP.POP, 1, 0], [OP.MULDIV, 3, 1],
+        [OP.JZ, 1, 0], [OP.JNZ, 1, 0], [OP.REFUSEV, 1, 0], [r.pick([OP.NEG, OP.ABS, OP.NOT]), 1, 1],
+      ];
+      const [o, pop, push] = pick < table.length ? table[pick] : [r.pick(bin), 2, 1];
+      if (depth < pop || depth - pop + push > 30) { code.push(OP.PUSHR, r.int(100)); depth++; continue; }
+      code.push(o);
+      switch (o) {
+        case OP.PUSHI: case OP.PUSHR: {
+          const v = r.pick([BigInt(r.int(200) - 100), BigInt.asIntN(64, r.big()), -(1n << 63n), (1n << 63n) - 1n, 0n, -1n, 1_000_000n, BigInt(r.int(2e12))]);
+          code.push(...varint(v)); break;
+        }
+        case OP.CTX: code.push(r.int(16)); break;
+        case OP.WAL: code.push(small(), r.int(14)); break;
+        case OP.WIN: code.push(small(), r.int(2)); break;
+        case OP.CLOCK: code.push(r.int(9), r.int(256), r.int(256), small()); break;
+        case OP.DAYLIGHT: code.push(r.int(256), r.int(256), r.int(256), r.int(256)); break;
+        case OP.MOON: code.push(r.int(3)); break;
+        case OP.RINGTICK: case OP.RINGAT: { const w = 1 + r.int(3600); code.push(r.pick([0, 48, 96, 160, 208]), w & 0xff, (w >> 8) & 0xff, 0, 0); break; }
+        case OP.LDG: case OP.STG: code.push(small(), r.int(248)); break;
+        case OP.LDW: case OP.STW: code.push(small(), small(), r.int(24)); break;
+        case OP.KEQ: code.push(small(), r.int(7), small(), r.int(7)); break;
+        case OP.KSTG: code.push(r.int(224), small(), r.int(4)); break;
+        case OP.KSTW: code.push(small(), 0, small(), r.int(4)); break;
+        case OP.LDL: case OP.STL: code.push(r.int(32)); break;
+        case OP.JZ: case OP.JNZ: code.push(0, 0); break;
+        case OP.REFUSEV: code.push(r.int(2)); break;
+      }
+      depth = depth - pop + push;
+      if (o === OP.REFUSEV) break;
+    }
+    const keys = Array.from({ length: r.int(3) }, () => new Uint8Array(32).fill(r.int(256)));
+    const reasons: [number, string][] = [[1, 'a {}'], [3, 'b {}']];
+    const rb: number[] = [];
+    for (const [f, t] of reasons) { const b = new TextEncoder().encode(t); rb.push(f, b.length, ...b); }
+    const sc = new Uint8Array(16 + 32 * keys.length + rb.length + code.length);
+    sc.set([0x48, 0x53, 1, 0, keys.length, reasons.length, code.length & 0xff, code.length >> 8]);
+    keys.forEach((kk, i) => sc.set(kk, 16 + 32 * i));
+    sc.set(rb, 16 + 32 * keys.length); sc.set(code, 16 + 32 * keys.length + rb.length);
+    try { const i = analyze(sc, { noLimit: true }); sc[3] = i.flags; sc[8] = Math.min(i.gasMax, 65535) & 0xff; sc[9] = Math.min(i.gasMax, 65535) >> 8; sc[10] = i.globalsLen & 0xff; sc[11] = i.globalsLen >> 8; sc[12] = i.wvarsLen; sc[13] = i.maxStack; sc[14] = i.nLocals; } catch { /* leave header zeros */ }
+    out.push(sc);
+  }
+  return out;
+}
+
 export function compare(lines: string[], rust: string[]) {
   let same = 0;
   const diffs: string[] = [];
@@ -135,6 +195,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     scripts.push(r.bytes);
   }
   const lines = corpusFromScripts(scripts, n);
+  // structured random programs: one random ctx/state each
+  const sr = rng(4242);
+  for (const sc of structuredScripts(n * 20)) {
+    const c = randomCtx(sr, sr.f() < 0.3);
+    const g = sr.f() < 0.5 ? new Uint8Array(256) : randBytes(sr, 256);
+    lines.push(`verify ${hx(sc)}`);
+    lines.push(runLine(sc, c, g, randBytes(sr, 32), sr.f() < 0.2 ? new Uint8Array(0) : randBytes(sr, 32)));
+  }
   const extra = process.argv.indexOf('--extra');
   if (extra > 0 && existsSync(process.argv[extra + 1])) lines.push(...readFileSync(process.argv[extra + 1], 'utf8').trim().split('\n'));
   const bin = buildRunner();
@@ -142,7 +210,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const rust = rustRun(bin, lines);
   const res = compare(lines, rust);
   writeFileSync(join(ROOT, 'compiler', 'test', 'parity-last.txt'), `${new Date().toISOString()} ${res.same}/${res.total} identical (${JSON.stringify(res.counts)})\n`);
-  console.log(`parity: ${res.same}/${res.total} identical across ${scripts.length} example scripts + noise (${JSON.stringify(res.counts)}) in ${Date.now() - t0} ms`);
+  console.log(`parity: ${res.same}/${res.total} identical across ${scripts.length} example scripts, ${n * 20} structured random programs, mutations + noise (${JSON.stringify(res.counts)}) in ${Date.now() - t0} ms`);
   for (const d of res.diffs) console.log(d);
   if (res.same !== res.total) process.exitCode = 1;
   void analyze;

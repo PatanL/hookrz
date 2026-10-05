@@ -1,0 +1,5 @@
+node_modules/
+vm/target/
+vm/bench/target/
+fuzz/last-run.txt
+compiler/test/parity-last.txt

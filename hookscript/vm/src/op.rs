@@ -53,33 +53,104 @@ pub const KSTW: u8 = 0x46;
 
 /// Gas charged for one execution of `op`, in compute units (calibrated upper bounds; see SPEC.md "Cost model").
 /// `None` = not an opcode.
-pub const fn gas(op: u8) -> Option<u16> {
+#[inline]
+pub fn gas(op: u8) -> Option<u16> {
+    #[allow(clippy::indexing_slicing)] // u8 index into a 256-entry table
+    let g = GAS[op as usize];
+    if g == 0 {
+        None
+    } else {
+        Some(g)
+    }
+}
+
+/// The weight table as a flat lookup (0 = not an opcode).
+pub const GAS: [u16; 256] = {
+    let mut t = [0u16; 256];
+    let mut i = 0;
+    while i < 256 {
+        t[i] = match gas_of(i as u8) {
+            Some(g) => g,
+            None => 0,
+        };
+        i += 1;
+    }
+    t
+};
+
+const fn gas_of(op: u8) -> Option<u16> {
+    // Measured on sBPF (vm/bench, max over synthetic worst cases + the examples' fuzz runs) plus ~15%.
     Some(match op {
-        END | REFUSE => 40,
-        REFUSEV => 45,
-        JMP | JZ | JNZ => 16,
-        POP | DUP => 10,
-        PUSHI | PUSHR => 30,
-        LDL | STL => 12,
-        ADD | SUB | NEG | ABS | MIN | MAX | NOT => 14,
-        EQ | NE | LT | LE | GT | GE => 14,
-        MUL => 60,
-        DIV | MOD | MULDIV => 160,
-        CTX => 120,
-        WAL => 120,
-        WIN => 220,
-        CLOCK => 520,
-        DAYLIGHT => 700,
-        MOON => 800,
-        DECAY => 900,
-        RINGTICK => 320,
-        RINGAT => 240,
-        LDG | LDW => 45,
-        STG | STW => 50,
-        KEQ => 90,
-        KSTG | KSTW => 80,
+        END | REFUSE => 60,
+        REFUSEV => 70,
+        JMP => 70,
+        JZ | JNZ => 85,
+        POP => 40,
+        DUP => 60,
+        PUSHI | PUSHR => 85, // + 15 per varint byte (extra_push)
+        LDL => 65,
+        STL => 70,
+        ADD | SUB | EQ | NE | LT | LE | GT | GE => 80,
+        NEG | ABS => 75,
+        MIN | MAX => 85,
+        NOT => 60,
+        MOD => 95,
+        MUL | DIV | MULDIV => 280,
+        CTX => 105, // + 200 for value / mcap (extra_ctx)
+        WAL => 135,
+        WIN => 330,
+        CLOCK => 155, // + calendar / DST extras (extra_clock)
+        DAYLIGHT => 550,
+        MOON => 375,
+        DECAY => 810,
+        RINGTICK => 240,
+        RINGAT => 270,
+        LDG => 135,
+        STG => 140,
+        LDW | STW => 160,
+        KEQ => 195,
+        KSTG => 160,
+        KSTW => 170,
         _ => return None,
     })
+}
+
+/// Gas charged before the first op: header + table parse, copying globals and wallet vars in and out.
+/// Total = RUN_BASE + RUN_PER_REASON × n_reasons (see `run_base`).
+pub const RUN_BASE: u16 = 450;
+pub const RUN_PER_REASON: u16 = 30;
+
+#[inline]
+pub const fn run_base(n_reasons: u8) -> u32 {
+    RUN_BASE as u32 + (RUN_PER_REASON as u32).wrapping_mul(n_reasons as u32)
+}
+
+/// Extra gas for PUSHI / PUSHR by varint length (bytes).
+#[inline]
+pub const fn extra_push(len: usize) -> u16 {
+    (len as u16).wrapping_mul(15) // varints are <= 10 bytes; wrapping_mul avoids an overflow-check libcall on sBPF
+}
+
+/// Extra gas for CTX fields that multiply-divide (value, mcap).
+#[inline]
+pub const fn extra_ctx(f: u8) -> u16 {
+    if f == C_VALUE || f == C_MCAP {
+        200
+    } else {
+        0
+    }
+}
+
+/// Extra gas for CLOCK: civil-date fields and daylight-saving rules.
+#[inline]
+pub const fn extra_clock(f: u8, rule: u8) -> u16 {
+    let field = match f {
+        4..=6 => 100,
+        7 => 180,
+        _ => 0,
+    };
+    let dst = if rule != 0 { 450 } else { 0 };
+    field + dst
 }
 
 /// Operand bytes that follow the opcode. PUSHI/PUSHR are varints (returns None: variable).

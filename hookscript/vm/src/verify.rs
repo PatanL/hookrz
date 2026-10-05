@@ -177,7 +177,7 @@ pub fn analyze(script: &[u8]) -> Result<Info, VmError> {
     let c = h.code;
     let len = c.len();
     let mut labels = Labels { target: [0; LABELS], depth: [0; LABELS], gas: [0; LABELS], n: 0 };
-    let mut cur: Option<(u8, u32)> = Some((0, 0));
+    let mut cur: Option<(u8, u32)> = Some((0, op::run_base(h.n_reasons)));
     let mut pc = 0usize;
     let mut gas_max = 0u32;
     let mut max_stack = 0u8;
@@ -190,7 +190,7 @@ pub fn analyze(script: &[u8]) -> Result<Info, VmError> {
         labels.take(pc, &mut cur)?;
         let start = pc;
         let o = rd8(c, &mut pc)?;
-        let w = op::gas(o).ok_or(VmError::BadOpcode)? as u32;
+        let mut w = op::gas(o).ok_or(VmError::BadOpcode)? as u32;
         ops = ops.saturating_add(1);
         // (pop, push, kind) kind: 0 normal, 1 terminal, 2 jmp, 3 conditional
         let mut target = 0usize;
@@ -214,7 +214,9 @@ pub fn analyze(script: &[u8]) -> Result<Info, VmError> {
             op::POP => (1, 0, 0),
             op::DUP => (1, 2, 0),
             op::PUSHI | op::PUSHR => {
+                let at = pc;
                 rdvar(c, &mut pc)?;
+                w += op::extra_push(pc - at) as u32;
                 (0, 1, 0)
             }
             op::LDL | op::STL => {
@@ -234,6 +236,7 @@ pub fn analyze(script: &[u8]) -> Result<Info, VmError> {
             op::CTX => {
                 let f = rd8(c, &mut pc)?;
                 need(f < op::CTX_FIELDS, VmError::BadOperand)?;
+                w += op::extra_ctx(f) as u32;
                 if matches!(f, op::C_VALUE | op::C_PRICE | op::C_PROGRESS | op::C_MCAP | op::C_RAISED | op::C_FEE) {
                     flags |= op::F_CURVE;
                 }
@@ -258,6 +261,7 @@ pub fn analyze(script: &[u8]) -> Result<Info, VmError> {
                 rd16(c, &mut pc)?;
                 let rule = rd8(c, &mut pc)?;
                 need(f < op::CLOCK_FIELDS && rule <= 3, VmError::BadOperand)?;
+                w += op::extra_clock(f, rule) as u32;
                 (0, 1, 0)
             }
             op::DAYLIGHT => {

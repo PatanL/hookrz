@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Hookscript: compiler, reference interpreter, fuzzer and drafter for hookrz Custom blocks",
-  "engines": { "node": ">=22.6" },
+  "engines": {
+    "node": ">=22.6"
+  },
   "exports": {
     ".": "./compiler/src/index.ts",
     "./compiler": "./compiler/src/index.ts",
@@ -12,10 +14,14 @@
     "./drafter": "./drafter/draft.ts"
   },
   "scripts": {
-    "test": "node compiler/test/compiler.test.ts && node compiler/test/parity.ts && node fuzz/run.ts examples/*.hs",
-    "parity": "node compiler/test/parity.ts",
-    "fuzz": "node fuzz/run.ts examples/*.hs",
-    "examples": "node compiler/bin/hsc.ts examples/*.hs"
+    "test": "node compiler/test/compiler.test.ts && node compiler/test/parity.ts && node fuzz/run.ts examples/*.hs && node drafter/test-mock.ts",
+    "test:vm": "cd vm && cargo test --release",
+    "parity": "node compiler/test/parity.ts --cases 1000",
+    "fuzz": "node fuzz/run.ts --json fuzz/report.json examples/*.hs",
+    "honeypots": "node fuzz/run.ts --trades 3000 fuzz/honeypots/*.hs",
+    "drafter": "node drafter/test.ts",
+    "examples": "node compiler/bin/hsc.ts examples/*.hs",
+    "bench": "node vm/bench/cu.ts --json vm/bench/cu.json"
   },
   "optionalDependencies": {
     "@anthropic-ai/sdk": "*"

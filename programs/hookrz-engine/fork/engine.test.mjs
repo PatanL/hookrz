@@ -336,3 +336,35 @@ test('write_script: a big script is staged in chunks by the creator, sealed by i
   const c2 = f.coin();
   assert.equal(f.initStack(c2, [{ id: 'custom', params: {} }], { staged: true }).ok, false);
 });
+
+test('hookscript: the compiled examples run on chain (king-of-the-hill.hs, hot-potato.hs)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const hex = (n) => Buffer.from(readFileSync(new URL(`./fixtures/${n}.hex`, import.meta.url), 'utf8').trim(), 'hex');
+  {
+    const f = new Fork();
+    const c = f.coin();
+    ok(f.initStack(c, [{ id: 'custom', params: {} }], { script: hex('koth-example') }), 'init King of the Hill');
+    const a = f.holder(c), b = f.holder(c);
+    ok(await f.buy(c, a, pct(1)), 'a is crowned');
+    const r = await f.sendTo(c, a, b, 1n);
+    refused(r, 6128, 'the king can\'t send');
+    assert.ok(r.logs.some((l) => /Hookscript: You're the king: no selling or sending for \S+/.test(l)), r.logs.join('\n'));
+    ok(await f.buy(c, b, pct(2)), 'b outbids');
+    ok(await f.sell(c, a, 1n), 'a, dethroned, sells');
+    f.warp(6 * 3600);
+    ok(await f.sell(c, b, 1n), 'the crown lapses after 6h');
+  }
+  {
+    const f = new Fork();
+    const c = f.coin();
+    ok(f.initStack(c, [{ id: 'custom', params: {} }], { script: hex('hot-potato') }), 'init Hot potato');
+    const a = f.holder(c), b = f.holder(c);
+    ok(await f.buy(c, a, pct(1)), 'a catches the potato');
+    refused(await f.sell(c, a, 1n), 6128, 'the holder can\'t sell');
+    ok(await f.sendTo(c, a, b, 1n), 'pass it on');
+    ok(await f.sell(c, a, 1n), 'a is free');
+    f.warp(2 * 3600);
+    ok(await f.buy(c, a, 1n), 'b held it 2h and got burnt; anyone else may buy');
+    refused(await f.buy(c, b, 1n), 6128, 'the burnt wallet can\'t buy for 24h');
+  }
+});

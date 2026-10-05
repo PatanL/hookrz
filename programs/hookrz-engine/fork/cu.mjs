@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { Fork, pct } from './harness.mjs';
 
 const fixture = (n) => Buffer.from(readFileSync(new URL(`./fixtures/${n}.hex`, import.meta.url), 'utf8').trim(), 'hex');
-const SCRIPTS = { koth: fixture('koth'), heavy: fixture('heavy'), empty: fixture('empty'), feegate: fixture('feegate') };
+const SCRIPTS = Object.fromEntries(['koth', 'heavy', 'empty', 'feegate', 'koth-example', 'hot-potato'].map((n) => [n, fixture(n)]));
 
 // Params that keep every block on its full (passing) path.
 const P = {
@@ -90,6 +90,55 @@ for (const st of worst) {
   worstRows.push(row);
 }
 
+// The compiled example scripts on their heaviest paths, alone and under the five heaviest blocks.
+const HEAVY5 = ['hold-timer', 'circuit-breaker', 'sandwich-guard', 'sell-cooldown', 'lock-in'];
+async function scenario(ids, steps) {
+  const f = new Fork();
+  const c = f.coin({ feeSchedule: { cliff: 500_000_000n, frequency: 1n, reduction: 8_166_666n, periods: 60 } });
+  const slots = ids.map((id) => (id.startsWith('custom:') ? { id: 'custom', params: {} } : { id, params: P[id] }));
+  const script = SCRIPTS[ids.find((x) => x.startsWith('custom:')).slice(7)];
+  const r0 = f.initStack(c, slots, { script });
+  if (!r0.ok) throw new Error(`init ${ids}: ${r0.err}`);
+  f.setPool(c, { quoteReserve: c.threshold });
+  f.warp(61);
+  const h = { a: f.holder(c), b: f.holder(c), c: f.holder(c) };
+  const out = [];
+  for (const [label, run, expect] of steps) {
+    if (typeof run === 'number') { f.warp(run, Math.round(run * 2.5)); continue; }
+    const r = await run(f, c, h);
+    const got = r.ok ? 'ok' : r.code;
+    if (got !== expect) throw new Error(`${ids} / ${label}: expected ${expect}, got ${r.ok ? 'ok' : r.err}\n${r.logs.join('\n')}`);
+    out.push({ label, engine: r.engineCu, verdict: got });
+  }
+  return out;
+}
+const SCEN = {
+  'hot-potato': [
+    ['buy: catches the potato', (f, c, h) => f.buy(c, h.a, pct(0.2)), 'ok'],
+    ['', 80 * 60],
+    ['send: passes the potato', (f, c, h) => f.sendTo(c, h.a, h.b, 1000n), 'ok'],
+    ['', 2 * 3600 + 60],
+    ['buy: burns the holder and catches', (f, c, h) => f.buy(c, h.c, pct(0.2)), 'ok'],
+    ['buy refused: burnt wallet (reason with a duration)', (f, c, h) => f.buy(c, h.b, 1000n), 6128],
+    ['', 80 * 60],
+    ['sell refused: holding the potato', (f, c, h) => f.sell(c, h.c, 1000n), 6128],
+  ],
+  'koth-example': [
+    ['buy: takes the crown', (f, c, h) => f.buy(c, h.a, pct(0.2)), 'ok'],
+    ['', 600],
+    ['buy: outbids the faded bar', (f, c, h) => f.buy(c, h.b, pct(0.5)), 'ok'],
+    ['', 80 * 60],
+    ['send refused: the king (reason with a duration)', (f, c, h) => f.sendTo(c, h.b, h.c, 1000n), 6128],
+    ['sell: not the king', (f, c, h) => f.sell(c, h.a, 1000n), 'ok'],
+  ],
+};
+const exampleRows = [];
+for (const [name, steps] of Object.entries(SCEN)) {
+  for (const ids of [[`custom:${name}`], [...HEAVY5, `custom:${name}`]]) {
+    for (const r of await scenario(ids, steps)) exampleRows.push({ stack: ids.length > 1 ? `5 heavy blocks + ${name}` : name, ...r });
+  }
+}
+
 const fmt = (n) => (n == null ? '' : n.toLocaleString('en-US'));
 console.log('| Block | buy | sell | send | marginal (max over kinds, minus base) |');
 console.log('|---|---:|---:|---:|---:|');
@@ -97,7 +146,10 @@ for (const r of rows) console.log(`| ${r.what} | ${fmt(r.buy)} | ${fmt(r.sell)} 
 console.log('\n| Worst-case stack (6 slots) | buy | sell | send | whole tx (max) |');
 console.log('|---|---:|---:|---:|---:|');
 for (const r of worstRows) console.log(`| ${r.what} | ${fmt(r.buy)} | ${fmt(r.sell)} | ${fmt(r.send)} | ${fmt(Math.max(r.buyTx, r.sellTx, r.sendTx))} |`);
-const max = Math.max(...worstRows.flatMap((r) => [r.buy, r.sell, r.send]));
+console.log('\n| Example script (compiled), path | engine CU | verdict |');
+console.log('|---|---:|---|');
+for (const r of exampleRows) console.log(`| ${r.stack}: ${r.label} | ${fmt(r.engine)} | ${r.verdict} |`);
+const max = Math.max(...worstRows.flatMap((r) => [r.buy, r.sell, r.send]), ...exampleRows.map((r) => r.engine));
 console.log(`\nMax engine CU over the worst-case stacks: ${fmt(max)} (budget 30,000)`);
-writeFileSync(new URL('./cu.json', import.meta.url), JSON.stringify({ base, rows, worst: worstRows, max }, null, 1));
+writeFileSync(new URL('./cu.json', import.meta.url), JSON.stringify({ base, rows, worst: worstRows, examples: exampleRows, max }, null, 1));
 if (max > 30000) process.exit(1);

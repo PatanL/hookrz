@@ -4,7 +4,7 @@
     "name": "Birthday party hats",
     "bytes": 52,
     "ops": 16,
-    "staticCu": 700,
+    "staticCu": 2080,
     "fuzz": {
       "trades": 10000,
       "allowed": 10000,
@@ -14,22 +14,22 @@
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 6919,
+          "attempts": 6894,
           "refused": 0
         },
         "sell": {
-          "attempts": 2369,
+          "attempts": 2354,
           "refused": 0
         },
         "send": {
-          "attempts": 712,
+          "attempts": 752,
           "refused": 0
         }
       },
       "byReason": {},
-      "maxCu": 620,
-      "avgCu": 508,
-      "staticCu": 700,
+      "maxCu": 1820,
+      "avgCu": 1521,
+      "staticCu": 2080,
       "launches": 22,
       "seed": 1,
       "rust": {
@@ -52,34 +52,34 @@
     "name": "No single sell over a quarter of your bag in your first 2h",
     "bytes": 110,
     "ops": 15,
-    "staticCu": 760,
+    "staticCu": 2140,
     "fuzz": {
       "trades": 10000,
-      "allowed": 7729,
-      "refused": 2271,
-      "refusedPct": 22.7,
+      "allowed": 7773,
+      "refused": 2227,
+      "refusedPct": 22.3,
       "errors": 0,
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 5589,
+          "attempts": 5677,
           "refused": 0
         },
         "sell": {
-          "attempts": 3687,
-          "refused": 2271
+          "attempts": 3580,
+          "refused": 2227
         },
         "send": {
-          "attempts": 724,
+          "attempts": 743,
           "refused": 0
         }
       },
       "byReason": {
-        "No single sell over a quarter of your bag in your first 2h": 2271
+        "No single sell over a quarter of your bag in your first 2h": 2227
       },
-      "maxCu": 760,
-      "avgCu": 376,
-      "staticCu": 760,
+      "maxCu": 2140,
+      "avgCu": 1279,
+      "staticCu": 2140,
       "launches": 31,
       "seed": 1,
       "rust": {
@@ -90,7 +90,7 @@
     },
     "honeypot": {
       "ok": true,
-      "checkedWallets": 510,
+      "checkedWallets": 535,
       "locked": [],
       "allSellsRefused": false,
       "maxExitHours": 0.004722222222222222,
@@ -102,34 +102,34 @@
     "name": "FOMO: the last buyer before the clock runs out wins",
     "bytes": 191,
     "ops": 53,
-    "staticCu": 1606,
+    "staticCu": 4790,
     "fuzz": {
       "trades": 10000,
-      "allowed": 9999,
-      "refused": 1,
+      "allowed": 9998,
+      "refused": 2,
       "refusedPct": 0,
       "errors": 0,
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 6919,
-          "refused": 1
+          "attempts": 6894,
+          "refused": 2
         },
         "sell": {
-          "attempts": 2369,
+          "attempts": 2354,
           "refused": 0
         },
         "send": {
-          "attempts": 712,
+          "attempts": 752,
           "refused": 0
         }
       },
       "byReason": {
-        "Final minute: buys must be at least 0.05 SOL. {} left": 1
+        "Final minute: buys must be at least 0.05 SOL. {} left": 2
       },
-      "maxCu": 1368,
-      "avgCu": 878,
-      "staticCu": 1606,
+      "maxCu": 4225,
+      "avgCu": 2764,
+      "staticCu": 4790,
       "launches": 22,
       "seed": 1,
       "rust": {
@@ -140,7 +140,7 @@
     },
     "honeypot": {
       "ok": true,
-      "checkedWallets": 405,
+      "checkedWallets": 401,
       "locked": [],
       "allSellsRefused": false,
       "maxExitHours": 0.0002777777777777778,
@@ -152,34 +152,34 @@
     "name": "Werewolves only",
     "bytes": 81,
     "ops": 9,
-    "staticCu": 1080,
+    "staticCu": 1550,
     "fuzz": {
       "trades": 10000,
-      "allowed": 9805,
-      "refused": 195,
-      "refusedPct": 2,
+      "allowed": 9766,
+      "refused": 234,
+      "refusedPct": 2.3,
       "errors": 0,
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 6826,
+          "attempts": 6787,
           "refused": 0
         },
         "sell": {
-          "attempts": 2465,
-          "refused": 195
+          "attempts": 2480,
+          "refused": 234
         },
         "send": {
-          "attempts": 709,
+          "attempts": 733,
           "refused": 0
         }
       },
       "byReason": {
-        "It's a full moon. Sells reopen when it passes": 195
+        "It's a full moon. Sells reopen when it passes": 234
       },
-      "maxCu": 1080,
-      "avgCu": 393,
-      "staticCu": 1080,
+      "maxCu": 1550,
+      "avgCu": 1010,
+      "staticCu": 1550,
       "launches": 22,
       "seed": 1,
       "rust": {
@@ -190,10 +190,10 @@
     },
     "honeypot": {
       "ok": true,
-      "checkedWallets": 382,
+      "checkedWallets": 378,
       "locked": [],
       "allSellsRefused": false,
-      "maxExitHours": 22.5925,
+      "maxExitHours": 19.016944444444444,
       "notes": []
     }
   },
@@ -202,35 +202,35 @@
     "name": "Hot potato",
     "bytes": 316,
     "ops": 64,
-    "staticCu": 2860,
+    "staticCu": 7155,
     "fuzz": {
       "trades": 10000,
-      "allowed": 9603,
-      "refused": 397,
-      "refusedPct": 4,
+      "allowed": 9587,
+      "refused": 413,
+      "refusedPct": 4.1,
       "errors": 0,
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 6724,
-          "refused": 49
+          "attempts": 6679,
+          "refused": 30
         },
         "sell": {
-          "attempts": 2591,
-          "refused": 348
+          "attempts": 2602,
+          "refused": 383
         },
         "send": {
-          "attempts": 685,
+          "attempts": 719,
           "refused": 0
         }
       },
       "byReason": {
-        "You're holding the hot potato: send any amount to someone to pass it, or it burns in {}": 348,
-        "The hot potato burnt you: no buys for {}": 49
+        "You're holding the hot potato: send any amount to someone to pass it, or it burns in {}": 383,
+        "The hot potato burnt you: no buys for {}": 30
       },
-      "maxCu": 1646,
-      "avgCu": 1091,
-      "staticCu": 2860,
+      "maxCu": 4255,
+      "avgCu": 3026,
+      "staticCu": 7155,
       "launches": 21,
       "seed": 1,
       "rust": {
@@ -241,10 +241,10 @@
     },
     "honeypot": {
       "ok": true,
-      "checkedWallets": 386,
+      "checkedWallets": 383,
       "locked": [],
       "allSellsRefused": false,
-      "maxExitHours": 4.5925,
+      "maxExitHours": 2.0169444444444444,
       "notes": []
     }
   },
@@ -253,34 +253,34 @@
     "name": "Invite only for the first hour",
     "bytes": 169,
     "ops": 26,
-    "staticCu": 1176,
+    "staticCu": 3130,
     "fuzz": {
       "trades": 10000,
-      "allowed": 8110,
-      "refused": 1890,
-      "refusedPct": 18.9,
+      "allowed": 8077,
+      "refused": 1923,
+      "refusedPct": 19.2,
       "errors": 0,
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 7800,
-          "refused": 1890
+          "attempts": 7808,
+          "refused": 1923
         },
         "sell": {
-          "attempts": 1880,
+          "attempts": 1845,
           "refused": 0
         },
         "send": {
-          "attempts": 320,
+          "attempts": 347,
           "refused": 0
         }
       },
       "byReason": {
-        "Invite only for the first hour: ask a holder to send you 1 token. Opens to everyone in {}": 1890
+        "Invite only for the first hour: ask a holder to send you 1 token. Opens to everyone in {}": 1923
       },
-      "maxCu": 916,
-      "avgCu": 580,
-      "staticCu": 1176,
+      "maxCu": 2500,
+      "avgCu": 1716,
+      "staticCu": 3130,
       "launches": 21,
       "seed": 1,
       "rust": {
@@ -291,7 +291,7 @@
     },
     "honeypot": {
       "ok": true,
-      "checkedWallets": 359,
+      "checkedWallets": 367,
       "locked": [],
       "allSellsRefused": false,
       "maxExitHours": 0.0002777777777777778,
@@ -303,7 +303,7 @@
     "name": "Every 100th buy wins the pot",
     "bytes": 69,
     "ops": 23,
-    "staticCu": 1013,
+    "staticCu": 3100,
     "fuzz": {
       "trades": 10000,
       "allowed": 10000,
@@ -313,22 +313,22 @@
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 6919,
+          "attempts": 6894,
           "refused": 0
         },
         "sell": {
-          "attempts": 2369,
+          "attempts": 2354,
           "refused": 0
         },
         "send": {
-          "attempts": 712,
+          "attempts": 752,
           "refused": 0
         }
       },
       "byReason": {},
-      "maxCu": 1013,
-      "avgCu": 606,
-      "staticCu": 1013,
+      "maxCu": 3100,
+      "avgCu": 1972,
+      "staticCu": 3100,
       "launches": 22,
       "seed": 1,
       "rust": {
@@ -339,7 +339,7 @@
     },
     "honeypot": {
       "ok": true,
-      "checkedWallets": 387,
+      "checkedWallets": 384,
       "locked": [],
       "allSellsRefused": false,
       "maxExitHours": 0.0002777777777777778,
@@ -351,34 +351,34 @@
     "name": "King of the Hill",
     "bytes": 197,
     "ops": 46,
-    "staticCu": 2208,
+    "staticCu": 5485,
     "fuzz": {
       "trades": 10000,
-      "allowed": 9294,
-      "refused": 706,
-      "refusedPct": 7.1,
+      "allowed": 9347,
+      "refused": 653,
+      "refusedPct": 6.5,
       "errors": 0,
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 6565,
+          "attempts": 6581,
           "refused": 0
         },
         "sell": {
-          "attempts": 2754,
-          "refused": 702
+          "attempts": 2702,
+          "refused": 653
         },
         "send": {
-          "attempts": 681,
-          "refused": 4
+          "attempts": 717,
+          "refused": 0
         }
       },
       "byReason": {
-        "You're the king: no selling or sending for {}, unless someone outbids you": 706
+        "You're the king: no selling or sending for {}, unless someone outbids you": 653
       },
-      "maxCu": 1595,
-      "avgCu": 906,
-      "staticCu": 2208,
+      "maxCu": 3990,
+      "avgCu": 2547,
+      "staticCu": 5485,
       "launches": 21,
       "seed": 1,
       "rust": {
@@ -389,10 +389,10 @@
     },
     "honeypot": {
       "ok": true,
-      "checkedWallets": 353,
+      "checkedWallets": 365,
       "locked": [],
       "allSellsRefused": false,
-      "maxExitHours": 10.5925,
+      "maxExitHours": 6.016944444444444,
       "notes": []
     }
   },
@@ -401,34 +401,34 @@
     "name": "Last call",
     "bytes": 107,
     "ops": 9,
-    "staticCu": 800,
+    "staticCu": 1330,
     "fuzz": {
       "trades": 10000,
-      "allowed": 9565,
-      "refused": 435,
-      "refusedPct": 4.4,
+      "allowed": 9538,
+      "refused": 462,
+      "refusedPct": 4.6,
       "errors": 0,
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 7104,
-          "refused": 435
+          "attempts": 7097,
+          "refused": 462
         },
         "sell": {
-          "attempts": 2243,
+          "attempts": 2216,
           "refused": 0
         },
         "send": {
-          "attempts": 653,
+          "attempts": 687,
           "refused": 0
         }
       },
       "byReason": {
-        "Last call was at 22:59 UTC. Buys reopen at midnight; sells stay open": 435
+        "Last call was at 22:59 UTC. Buys reopen at midnight; sells stay open": 462
       },
-      "maxCu": 800,
-      "avgCu": 594,
-      "staticCu": 800,
+      "maxCu": 1330,
+      "avgCu": 1151,
+      "staticCu": 1330,
       "launches": 21,
       "seed": 1,
       "rust": {
@@ -439,7 +439,7 @@
     },
     "honeypot": {
       "ok": true,
-      "checkedWallets": 361,
+      "checkedWallets": 367,
       "locked": [],
       "allSellsRefused": false,
       "maxExitHours": 0.0002777777777777778,
@@ -451,35 +451,35 @@
     "name": "Library: quiet coin",
     "bytes": 167,
     "ops": 25,
-    "staticCu": 949,
+    "staticCu": 2540,
     "fuzz": {
       "trades": 10000,
-      "allowed": 4937,
-      "refused": 5063,
-      "refusedPct": 50.6,
+      "allowed": 4860,
+      "refused": 5140,
+      "refusedPct": 51.4,
       "errors": 0,
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 8435,
-          "refused": 4448
+          "attempts": 8489,
+          "refused": 4566
         },
         "sell": {
-          "attempts": 1294,
-          "refused": 615
+          "attempts": 1203,
+          "refused": 574
         },
         "send": {
-          "attempts": 271,
+          "attempts": 308,
           "refused": 0
         }
       },
       "byReason": {
-        "Shh. Nothing over 0.5% of supply in one go": 3222,
-        "Shh. One trade per wallet per hour. Next one in {}": 1841
+        "Shh. Nothing over 0.5% of supply in one go": 3320,
+        "Shh. One trade per wallet per hour. Next one in {}": 1820
       },
-      "maxCu": 949,
-      "avgCu": 838,
-      "staticCu": 949,
+      "maxCu": 2540,
+      "avgCu": 2343,
+      "staticCu": 2540,
       "launches": 17,
       "seed": 1,
       "rust": {
@@ -490,10 +490,10 @@
     },
     "honeypot": {
       "ok": true,
-      "checkedWallets": 289,
+      "checkedWallets": 299,
       "locked": [],
       "allSellsRefused": false,
-      "maxExitHours": 4.7775,
+      "maxExitHours": 3.051111111111111,
       "notes": []
     }
   },
@@ -502,34 +502,34 @@
     "name": "Louder: the opening auction",
     "bytes": 92,
     "ops": 16,
-    "staticCu": 725,
+    "staticCu": 1885,
     "fuzz": {
       "trades": 10000,
-      "allowed": 9328,
-      "refused": 672,
-      "refusedPct": 6.7,
+      "allowed": 9319,
+      "refused": 681,
+      "refusedPct": 6.8,
       "errors": 0,
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 7358,
-          "refused": 672
+          "attempts": 7364,
+          "refused": 681
         },
         "sell": {
-          "attempts": 2287,
+          "attempts": 2256,
           "refused": 0
         },
         "send": {
-          "attempts": 355,
+          "attempts": 380,
           "refused": 0
         }
       },
       "byReason": {
-        "Louder! Beat the last buy of {} tokens": 672
+        "Louder! Beat the last buy of {} tokens": 681
       },
-      "maxCu": 725,
-      "avgCu": 447,
-      "staticCu": 725,
+      "maxCu": 1885,
+      "avgCu": 1341,
+      "staticCu": 1885,
       "launches": 23,
       "seed": 1,
       "rust": {
@@ -540,7 +540,7 @@
     },
     "honeypot": {
       "ok": true,
-      "checkedWallets": 390,
+      "checkedWallets": 399,
       "locked": [],
       "allSellsRefused": false,
       "maxExitHours": 0.0002777777777777778,
@@ -552,32 +552,34 @@
     "name": "Curve only for the first 5 minutes",
     "bytes": 157,
     "ops": 14,
-    "staticCu": 675,
+    "staticCu": 1885,
     "fuzz": {
       "trades": 10000,
-      "allowed": 10000,
-      "refused": 0,
-      "refusedPct": 0,
+      "allowed": 9688,
+      "refused": 312,
+      "refusedPct": 3.1,
       "errors": 0,
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 6919,
+          "attempts": 7124,
+          "refused": 312
+        },
+        "send": {
+          "attempts": 553,
           "refused": 0
         },
         "sell": {
-          "attempts": 2369,
-          "refused": 0
-        },
-        "send": {
-          "attempts": 712,
+          "attempts": 2323,
           "refused": 0
         }
       },
-      "byReason": {},
-      "maxCu": 466,
-      "avgCu": 311,
-      "staticCu": 675,
+      "byReason": {
+        "For the first 5 minutes, buy on the curve directly. Aggregators open in {}": 312
+      },
+      "maxCu": 1885,
+      "avgCu": 1153,
+      "staticCu": 1885,
       "launches": 22,
       "seed": 1,
       "rust": {
@@ -588,7 +590,7 @@
     },
     "honeypot": {
       "ok": true,
-      "checkedWallets": 371,
+      "checkedWallets": 385,
       "locked": [],
       "allSellsRefused": false,
       "maxExitHours": 0.0002777777777777778,
@@ -600,35 +602,35 @@
     "name": "Odd and even",
     "bytes": 140,
     "ops": 22,
-    "staticCu": 1940,
+    "staticCu": 2540,
     "fuzz": {
       "trades": 10000,
-      "allowed": 5203,
-      "refused": 4797,
-      "refusedPct": 48,
+      "allowed": 5286,
+      "refused": 4714,
+      "refusedPct": 47.1,
       "errors": 0,
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 7856,
-          "refused": 3963
-        },
-        "sell": {
-          "attempts": 1797,
-          "refused": 834
+          "attempts": 7778,
+          "refused": 3852
         },
         "send": {
-          "attempts": 347,
+          "attempts": 384,
           "refused": 0
+        },
+        "sell": {
+          "attempts": 1838,
+          "refused": 862
         }
       },
       "byReason": {
-        "Buys only on odd seconds. Try again": 3963,
-        "Sells only on even seconds. Try again": 834
+        "Buys only on odd seconds. Try again": 3852,
+        "Sells only on even seconds. Try again": 862
       },
-      "maxCu": 1170,
-      "avgCu": 1051,
-      "staticCu": 1940,
+      "maxCu": 1925,
+      "avgCu": 1727,
+      "staticCu": 2540,
       "launches": 15,
       "seed": 1,
       "rust": {
@@ -639,7 +641,7 @@
     },
     "honeypot": {
       "ok": true,
-      "checkedWallets": 258,
+      "checkedWallets": 263,
       "locked": [],
       "allSellsRefused": false,
       "maxExitHours": 0.0005555555555555556,
@@ -651,35 +653,35 @@
     "name": "One bite per wallet",
     "bytes": 80,
     "ops": 9,
-    "staticCu": 321,
+    "staticCu": 1355,
     "fuzz": {
       "trades": 10000,
-      "allowed": 3693,
-      "refused": 6307,
-      "refusedPct": 63.1,
+      "allowed": 3601,
+      "refused": 6399,
+      "refusedPct": 64,
       "errors": 0,
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 8534,
-          "refused": 6307
+          "attempts": 8546,
+          "refused": 6399
         },
         "sell": {
-          "attempts": 1082,
+          "attempts": 1068,
           "refused": 0
         },
         "send": {
-          "attempts": 384,
+          "attempts": 386,
           "refused": 0
         }
       },
       "byReason": {
-        "One bite per wallet: you already bought": 6307
+        "One bite per wallet: you already bought": 6399
       },
-      "maxCu": 321,
-      "avgCu": 275,
-      "staticCu": 321,
-      "launches": 12,
+      "maxCu": 1355,
+      "avgCu": 1154,
+      "staticCu": 1355,
+      "launches": 11,
       "seed": 1,
       "rust": {
         "checked": 10000,
@@ -689,7 +691,7 @@
     },
     "honeypot": {
       "ok": true,
-      "checkedWallets": 205,
+      "checkedWallets": 194,
       "locked": [],
       "allSellsRefused": false,
       "maxExitHours": 0.0002777777777777778,
@@ -701,35 +703,35 @@
     "name": "Open mic: one buyer per 30 seconds",
     "bytes": 124,
     "ops": 27,
-    "staticCu": 1014,
+    "staticCu": 2705,
     "fuzz": {
       "trades": 10000,
-      "allowed": 7807,
-      "refused": 2193,
-      "refusedPct": 21.9,
+      "allowed": 7770,
+      "refused": 2230,
+      "refusedPct": 22.3,
       "errors": 0,
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 7934,
-          "refused": 2193
+          "attempts": 7917,
+          "refused": 2230
         },
         "sell": {
-          "attempts": 1747,
+          "attempts": 1737,
           "refused": 0
         },
         "send": {
-          "attempts": 319,
+          "attempts": 346,
           "refused": 0
         }
       },
       "byReason": {
-        "Someone has the mic. The next slot opens in {}": 2193
+        "Someone has the mic. The next slot opens in {}": 2230
       },
-      "maxCu": 908,
-      "avgCu": 732,
-      "staticCu": 1014,
-      "launches": 21,
+      "maxCu": 2425,
+      "avgCu": 2066,
+      "staticCu": 2705,
+      "launches": 20,
       "seed": 1,
       "rust": {
         "checked": 10000,
@@ -751,34 +753,34 @@
     "name": "No buys after a 30% pump in 10 minutes",
     "bytes": 122,
     "ops": 12,
-    "staticCu": 1020,
+    "staticCu": 2115,
     "fuzz": {
       "trades": 10000,
-      "allowed": 9307,
-      "refused": 693,
-      "refusedPct": 6.9,
+      "allowed": 9330,
+      "refused": 670,
+      "refusedPct": 6.7,
       "errors": 0,
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 7334,
-          "refused": 693
-        },
-        "sell": {
-          "attempts": 2267,
-          "refused": 0
+          "attempts": 7298,
+          "refused": 670
         },
         "send": {
-          "attempts": 399,
+          "attempts": 442,
+          "refused": 0
+        },
+        "sell": {
+          "attempts": 2260,
           "refused": 0
         }
       },
       "byReason": {
-        "Price is up more than 30% in 10 minutes; buys pause until it cools off": 693
+        "Price is up more than 30% in 10 minutes; buys pause until it cools off": 670
       },
-      "maxCu": 1020,
-      "avgCu": 855,
-      "staticCu": 1020,
+      "maxCu": 2115,
+      "avgCu": 1798,
+      "staticCu": 2115,
       "launches": 23,
       "seed": 1,
       "rust": {
@@ -789,7 +791,7 @@
     },
     "honeypot": {
       "ok": true,
-      "checkedWallets": 397,
+      "checkedWallets": 392,
       "locked": [],
       "allSellsRefused": false,
       "maxExitHours": 0.0002777777777777778,
@@ -801,293 +803,34 @@
     "name": "No cutting the line",
     "bytes": 167,
     "ops": 36,
-    "staticCu": 1357,
+    "staticCu": 4305,
     "fuzz": {
       "trades": 10000,
-      "allowed": 8421,
-      "refused": 1579,
-      "refusedPct": 15.8,
+      "allowed": 8602,
+      "refused": 1398,
+      "refusedPct": 14,
       "errors": 0,
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 5990,
+          "attempts": 6110,
           "refused": 0
         },
         "sell": {
-          "attempts": 3395,
-          "refused": 1579
+          "attempts": 3233,
+          "refused": 1398
         },
         "send": {
-          "attempts": 615,
+          "attempts": 657,
           "refused": 0
         }
       },
       "byReason": {
-        "No cutting the line: wait for 3 people to buy after you, or {}": 1579
+        "No cutting the line: wait for 3 people to buy after you, or {}": 1398
       },
-      "maxCu": 1018,
-      "avgCu": 660,
-      "staticCu": 1357,
-      "launches": 19,
-      "seed": 1,
-      "rust": {
-        "checked": 10000,
-        "identical": 10000,
-        "panics": 0
-      }
-    },
-    "honeypot": {
-      "ok": true,
-      "checkedWallets": 327,
-      "locked": [],
-      "allSellsRefused": false,
-      "maxExitHours": 22.5925,
-      "notes": []
-    }
-  },
-  {
-    "file": "stairs.hs",
-    "name": "Stairs: every buy at most 2x the last one",
-    "bytes": 116,
-    "ops": 20,
-    "staticCu": 883,
-    "fuzz": {
-      "trades": 10000,
-      "allowed": 0,
-      "refused": 10000,
-      "refusedPct": 100,
-      "errors": 0,
-      "panics": 0,
-      "byKind": {
-        "buy": {
-          "attempts": 10000,
-          "refused": 10000
-        }
-      },
-      "byReason": {
-        "One step at a time: the biggest buy right now is {} tokens": 10000
-      },
-      "maxCu": 770,
-      "avgCu": 770,
-      "staticCu": 883,
-      "launches": 9,
-      "seed": 1,
-      "rust": {
-        "checked": 10000,
-        "identical": 10000,
-        "panics": 0
-      }
-    },
-    "honeypot": {
-      "ok": true,
-      "checkedWallets": 0,
-      "locked": [],
-      "allSellsRefused": false,
-      "maxExitHours": 0,
-      "notes": []
-    }
-  },
-  {
-    "file": "sunrise.hs",
-    "name": "Sunrise in Tokyo",
-    "bytes": 107,
-    "ops": 7,
-    "staticCu": 936,
-    "fuzz": {
-      "trades": 10000,
-      "allowed": 2808,
-      "refused": 7192,
-      "refusedPct": 71.9,
-      "errors": 0,
-      "panics": 0,
-      "byKind": {
-        "buy": {
-          "attempts": 8569,
-          "refused": 6606
-        },
-        "sell": {
-          "attempts": 1167,
-          "refused": 586
-        },
-        "send": {
-          "attempts": 264,
-          "refused": 0
-        }
-      },
-      "byReason": {
-        "The sun is down in Tokyo. Trading reopens at sunrise; sends always work": 7192
-      },
-      "maxCu": 936,
-      "avgCu": 906,
-      "staticCu": 936,
-      "launches": 12,
-      "seed": 1,
-      "rust": {
-        "checked": 10000,
-        "identical": 10000,
-        "panics": 0
-      }
-    },
-    "honeypot": {
-      "ok": false,
-      "checkedWallets": 170,
-      "locked": [
-        {
-          "wallet": "#142",
-          "type": "believer",
-          "startTokens": 13918765,
-          "leftTokens": 13918765,
-          "tries": 102,
-          "lastMessage": "The sun is down in Tokyo. Trading reopens at sunrise; sends always work"
-        },
-        {
-          "wallet": "#146",
-          "type": "believer",
-          "startTokens": 11979821,
-          "leftTokens": 11979821,
-          "tries": 102,
-          "lastMessage": "The sun is down in Tokyo. Trading reopens at sunrise; sends always work"
-        },
-        {
-          "wallet": "#185",
-          "type": "believer",
-          "startTokens": 11481996,
-          "leftTokens": 11481996,
-          "tries": 102,
-          "lastMessage": "The sun is down in Tokyo. Trading reopens at sunrise; sends always work"
-        },
-        {
-          "wallet": "#117",
-          "type": "believer",
-          "startTokens": 11038030,
-          "leftTokens": 11038030,
-          "tries": 102,
-          "lastMessage": "The sun is down in Tokyo. Trading reopens at sunrise; sends always work"
-        },
-        {
-          "wallet": "#190",
-          "type": "believer",
-          "startTokens": 11001643,
-          "leftTokens": 11001643,
-          "tries": 102,
-          "lastMessage": "The sun is down in Tokyo. Trading reopens at sunrise; sends always work"
-        },
-        {
-          "wallet": "#115",
-          "type": "believer",
-          "startTokens": 10670396,
-          "leftTokens": 10670396,
-          "tries": 102,
-          "lastMessage": "The sun is down in Tokyo. Trading reopens at sunrise; sends always work"
-        },
-        {
-          "wallet": "#58",
-          "type": "paper",
-          "startTokens": 747399,
-          "leftTokens": 747399,
-          "tries": 102,
-          "lastMessage": "The sun is down in Tokyo. Trading reopens at sunrise; sends always work"
-        },
-        {
-          "wallet": "#68",
-          "type": "paper",
-          "startTokens": 3519295,
-          "leftTokens": 3519295,
-          "tries": 102,
-          "lastMessage": "The sun is down in Tokyo. Trading reopens at sunrise; sends always work"
-        }
-      ],
-      "allSellsRefused": false,
-      "maxExitHours": 10.5925,
-      "notes": [
-        "8 holder(s) couldn't sell below 1% of their bag within 60 days with nobody else trading."
-      ]
-    }
-  },
-  {
-    "file": "tag.hs",
-    "name": "Tag, you're it",
-    "bytes": 159,
-    "ops": 27,
-    "staticCu": 1329,
-    "fuzz": {
-      "trades": 10000,
-      "allowed": 9801,
-      "refused": 199,
-      "refusedPct": 2,
-      "errors": 0,
-      "panics": 0,
-      "byKind": {
-        "buy": {
-          "attempts": 6790,
-          "refused": 0
-        },
-        "sell": {
-          "attempts": 2493,
-          "refused": 199
-        },
-        "send": {
-          "attempts": 717,
-          "refused": 0
-        }
-      },
-      "byReason": {
-        "You're it! Tag someone (send them any amount) before you sell, or wait {}": 199
-      },
-      "maxCu": 973,
-      "avgCu": 422,
-      "staticCu": 1329,
-      "launches": 22,
-      "seed": 1,
-      "rust": {
-        "checked": 10000,
-        "identical": 10000,
-        "panics": 0
-      }
-    },
-    "honeypot": {
-      "ok": true,
-      "checkedWallets": 391,
-      "locked": [],
-      "allSellsRefused": false,
-      "maxExitHours": 10.5925,
-      "notes": []
-    }
-  },
-  {
-    "file": "usurp.hs",
-    "name": "Usurp the crown",
-    "bytes": 176,
-    "ops": 39,
-    "staticCu": 2817,
-    "fuzz": {
-      "trades": 10000,
-      "allowed": 9192,
-      "refused": 808,
-      "refusedPct": 8.1,
-      "errors": 0,
-      "panics": 0,
-      "byKind": {
-        "buy": {
-          "attempts": 6511,
-          "refused": 0
-        },
-        "sell": {
-          "attempts": 2826,
-          "refused": 801
-        },
-        "send": {
-          "attempts": 663,
-          "refused": 7
-        }
-      },
-      "byReason": {
-        "Abdicate first: someone has to outbid you. The crown lapses in {}": 808
-      },
-      "maxCu": 2204,
-      "avgCu": 1394,
-      "staticCu": 2817,
+      "maxCu": 3130,
+      "avgCu": 2220,
+      "staticCu": 4305,
       "launches": 20,
       "seed": 1,
       "rust": {
@@ -1098,10 +841,210 @@
     },
     "honeypot": {
       "ok": true,
-      "checkedWallets": 351,
+      "checkedWallets": 342,
       "locked": [],
       "allSellsRefused": false,
-      "maxExitHours": 22.5925,
+      "maxExitHours": 12.016944444444444,
+      "notes": []
+    }
+  },
+  {
+    "file": "stairs.hs",
+    "name": "Stairs: every buy at most 2x the last one",
+    "bytes": 117,
+    "ops": 20,
+    "staticCu": 2615,
+    "fuzz": {
+      "trades": 10000,
+      "allowed": 9497,
+      "refused": 503,
+      "refusedPct": 5,
+      "errors": 0,
+      "panics": 0,
+      "byKind": {
+        "buy": {
+          "attempts": 7209,
+          "refused": 503
+        },
+        "sell": {
+          "attempts": 2089,
+          "refused": 0
+        },
+        "send": {
+          "attempts": 702,
+          "refused": 0
+        }
+      },
+      "byReason": {
+        "One step at a time: the biggest buy right now is {} tokens": 503
+      },
+      "maxCu": 2615,
+      "avgCu": 2117,
+      "staticCu": 2615,
+      "launches": 23,
+      "seed": 1,
+      "rust": {
+        "checked": 10000,
+        "identical": 10000,
+        "panics": 0
+      }
+    },
+    "honeypot": {
+      "ok": true,
+      "checkedWallets": 389,
+      "locked": [],
+      "allSellsRefused": false,
+      "maxExitHours": 0.0002777777777777778,
+      "notes": []
+    }
+  },
+  {
+    "file": "sunrise.hs",
+    "name": "Sunrise in Tokyo",
+    "bytes": 107,
+    "ops": 7,
+    "staticCu": 1545,
+    "fuzz": {
+      "trades": 10000,
+      "allowed": 2746,
+      "refused": 7254,
+      "refusedPct": 72.5,
+      "errors": 0,
+      "panics": 0,
+      "byKind": {
+        "buy": {
+          "attempts": 8577,
+          "refused": 6643
+        },
+        "sell": {
+          "attempts": 1177,
+          "refused": 611
+        },
+        "send": {
+          "attempts": 246,
+          "refused": 0
+        }
+      },
+      "byReason": {
+        "The sun is down in Tokyo. Trading reopens at sunrise; sends always work": 7254
+      },
+      "maxCu": 1545,
+      "avgCu": 1513,
+      "staticCu": 1545,
+      "launches": 11,
+      "seed": 1,
+      "rust": {
+        "checked": 10000,
+        "identical": 10000,
+        "panics": 0
+      }
+    },
+    "honeypot": {
+      "ok": true,
+      "checkedWallets": 156,
+      "locked": [],
+      "allSellsRefused": false,
+      "maxExitHours": 12.016944444444444,
+      "notes": []
+    }
+  },
+  {
+    "file": "tag.hs",
+    "name": "Tag, you're it",
+    "bytes": 159,
+    "ops": 27,
+    "staticCu": 3400,
+    "fuzz": {
+      "trades": 10000,
+      "allowed": 9805,
+      "refused": 195,
+      "refusedPct": 2,
+      "errors": 0,
+      "panics": 0,
+      "byKind": {
+        "buy": {
+          "attempts": 6795,
+          "refused": 0
+        },
+        "sell": {
+          "attempts": 2460,
+          "refused": 195
+        },
+        "send": {
+          "attempts": 745,
+          "refused": 0
+        }
+      },
+      "byReason": {
+        "You're it! Tag someone (send them any amount) before you sell, or wait {}": 195
+      },
+      "maxCu": 2715,
+      "avgCu": 1364,
+      "staticCu": 3400,
+      "launches": 22,
+      "seed": 1,
+      "rust": {
+        "checked": 10000,
+        "identical": 10000,
+        "panics": 0
+      }
+    },
+    "honeypot": {
+      "ok": true,
+      "checkedWallets": 403,
+      "locked": [],
+      "allSellsRefused": false,
+      "maxExitHours": 6.016944444444444,
+      "notes": []
+    }
+  },
+  {
+    "file": "usurp.hs",
+    "name": "Usurp the crown",
+    "bytes": 176,
+    "ops": 39,
+    "staticCu": 5555,
+    "fuzz": {
+      "trades": 10000,
+      "allowed": 9326,
+      "refused": 674,
+      "refusedPct": 6.7,
+      "errors": 0,
+      "panics": 0,
+      "byKind": {
+        "buy": {
+          "attempts": 6566,
+          "refused": 0
+        },
+        "sell": {
+          "attempts": 2724,
+          "refused": 674
+        },
+        "send": {
+          "attempts": 710,
+          "refused": 0
+        }
+      },
+      "byReason": {
+        "Abdicate first: someone has to outbid you. The crown lapses in {}": 674
+      },
+      "maxCu": 4060,
+      "avgCu": 2875,
+      "staticCu": 5555,
+      "launches": 21,
+      "seed": 1,
+      "rust": {
+        "checked": 10000,
+        "identical": 10000,
+        "panics": 0
+      }
+    },
+    "honeypot": {
+      "ok": true,
+      "checkedWallets": 371,
+      "locked": [],
+      "allSellsRefused": false,
+      "maxExitHours": 12.016944444444444,
       "notes": []
     }
   },
@@ -1110,34 +1053,34 @@
     "name": "Closed on weekends",
     "bytes": 131,
     "ops": 17,
-    "staticCu": 916,
+    "staticCu": 2345,
     "fuzz": {
       "trades": 10000,
-      "allowed": 3706,
-      "refused": 6294,
-      "refusedPct": 62.9,
+      "allowed": 3760,
+      "refused": 6240,
+      "refusedPct": 62.4,
       "errors": 0,
       "panics": 0,
       "byKind": {
         "buy": {
-          "attempts": 8591,
-          "refused": 6029
+          "attempts": 8575,
+          "refused": 5975
         },
         "sell": {
-          "attempts": 1111,
+          "attempts": 1106,
           "refused": 265
         },
         "send": {
-          "attempts": 298,
+          "attempts": 319,
           "refused": 0
         }
       },
       "byReason": {
-        "The curve is closed on weekends (New York time). It reopens Monday at midnight": 6294
+        "The curve is closed on weekends (New York time). It reopens Monday at midnight": 6240
       },
-      "maxCu": 916,
-      "avgCu": 858,
-      "staticCu": 916,
+      "maxCu": 2345,
+      "avgCu": 2178,
+      "staticCu": 2345,
       "launches": 13,
       "seed": 1,
       "rust": {
@@ -1148,10 +1091,10 @@
     },
     "honeypot": {
       "ok": true,
-      "checkedWallets": 164,
+      "checkedWallets": 172,
       "locked": [],
       "allSellsRefused": false,
-      "maxExitHours": 46.5925,
+      "maxExitHours": 43.01694444444445,
       "notes": []
     }
   }

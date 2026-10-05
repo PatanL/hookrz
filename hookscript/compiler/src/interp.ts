@@ -4,6 +4,7 @@
 import {
   OP, gasOf, MAGIC, VERSION, HEADER_LEN, MAX_CODE, GLOBALS_LEN, WVARS_LEN, STACK_MAX, LOCALS_MAX, MAX_KEYS, MAX_REASONS,
   MAX_REASON_LEN, GAS_LIMIT, RING_BYTES, C, W, T, TYPE_SIZE, K, KC, F, FMT, FMT_MAX, CTX_FIELDS, WAL_FIELDS, CLOCK_FIELDS, MOON_FIELDS,
+  runBase, extraPush, extraCtx, extraClock,
 } from './bytecode.ts';
 import * as M from './math.ts';
 import type { Ctx, WalletView } from './ctx.ts';
@@ -246,6 +247,7 @@ export function run(code: Uint8Array, c: Ctx, globals: Uint8Array, walletSrc: Ui
   const g0 = globals.slice(), s0 = walletSrc.slice(), d0 = walletDst.slice();
   try {
     const h = parse(code);
+    box.gas = runBase(h.nReasons);
     const glen = Math.min(globals.length, GLOBALS_LEN);
     const mem: Mem = {
       g: globals.slice(0, glen), ws: new Uint8Array(WVARS_LEN), wd: new Uint8Array(WVARS_LEN),
@@ -274,13 +276,13 @@ function exec(h: Header, c: Ctx, m: Mem, box: { gas: number }): Verdict {
   const pop = (): bigint => { if (st.length === 0) err('StackUnderflow'); return st.pop() as bigint; };
   const loc: bigint[] = new Array(LOCALS_MAX).fill(0n);
   const r: PC = { pc: 0 };
+  const charge = (w: number) => { box.gas += w; if (box.gas > GAS_LIMIT) err('OutOfGas'); };
   for (;;) {
     if (r.pc >= code.length) return { allow: true };
     const o = code[r.pc];
     const w = gasOf(o);
     if (w === undefined) err('BadOpcode');
-    box.gas += w as number;
-    if (box.gas > GAS_LIMIT) err('OutOfGas');
+    charge(w as number);
     r.pc++;
     switch (o) {
       case OP.END: return { allow: true };
@@ -300,8 +302,13 @@ function exec(h: Header, c: Ctx, m: Mem, box: { gas: number }): Verdict {
       }
       case OP.POP: pop(); break;
       case OP.DUP: { const a = pop(); push(a); push(a); break; }
-      case OP.PUSHI: push(n(rdvar(code, r))); break;
-      case OP.PUSHR: push(rdvar(code, r)); break;
+      case OP.PUSHI: case OP.PUSHR: {
+        const at = r.pc;
+        const v = rdvar(code, r);
+        charge(extraPush(r.pc - at));
+        push(o === OP.PUSHI ? n(v) : v);
+        break;
+      }
       case OP.LDL: { const i = rd8(code, r); if (i >= LOCALS_MAX) err('BadOperand'); push(loc[i]); break; }
       case OP.STL: { const i = rd8(code, r); const v = pop(); if (i >= LOCALS_MAX) err('BadOperand'); loc[i] = v; break; }
       case OP.NEG: push(sat(-pop())); break;
@@ -330,11 +337,12 @@ function exec(h: Header, c: Ctx, m: Mem, box: { gas: number }): Verdict {
         push(v);
         break;
       }
-      case OP.CTX: { const f = rd8(code, r); push(ctxField(c, f)); break; }
+      case OP.CTX: { const f = rd8(code, r); charge(extraCtx(f)); push(ctxField(c, f)); break; }
       case OP.WAL: { const side = rd8(code, r); const f = rd8(code, r); const s = sideOf(c, side); push(walField(c, s, f)); break; }
       case OP.WIN: { const side = rd8(code, r); const dir = rd8(code, r); const s = sideOf(c, side); const win = pop(); push(windowSum(c, s, dir, win)); break; }
       case OP.CLOCK: {
         const f = rd8(code, r); const tz = rd16s(code, r); const rule = rd8(code, r);
+        charge(extraClock(f, rule));
         if (rule > 3) err('BadOperand');
         const v = M.clock(c.now, f, tz, rule); if (v === undefined) err('BadOperand');
         push(v as bigint); break;
@@ -386,7 +394,7 @@ export function analyze(s: Uint8Array, opts: { noLimit?: boolean } = {}): Info {
     if (labels.length >= 64) err('TooManyLabels');
     labels.push({ target, depth, gas });
   };
-  let cur: [number, number] | null = [0, 0];
+  let cur: [number, number] | null = [0, runBase(h.nReasons)];
   const take = (pc: number) => {
     for (let i = 0; i < labels.length;) {
       const l = labels[i];
@@ -416,7 +424,7 @@ export function analyze(s: Uint8Array, opts: { noLimit?: boolean } = {}): Info {
     take(r.pc);
     const start = r.pc;
     const o = rd8(c, r);
-    const w = gasOf(o);
+    let w = gasOf(o);
     if (w === undefined) err('BadOpcode');
     ops++;
     let target = 0;
@@ -427,16 +435,16 @@ export function analyze(s: Uint8Array, opts: { noLimit?: boolean } = {}): Info {
       case OP.JMP: case OP.JZ: case OP.JNZ: { const off = rd16(c, r); target = r.pc + off; need(target <= len, 'BadJump'); if (o === OP.JMP) kind = 2; else { pop = 1; kind = 3; } break; }
       case OP.POP: pop = 1; break;
       case OP.DUP: pop = 1; push = 2; break;
-      case OP.PUSHI: case OP.PUSHR: rdvar(c, r); push = 1; break;
+      case OP.PUSHI: case OP.PUSHR: { const at = r.pc; rdvar(c, r); w = (w as number) + extraPush(r.pc - at); push = 1; break; }
       case OP.LDL: case OP.STL: { const i = rd8(c, r); need(i < LOCALS_MAX, 'BadOperand'); nl = Math.max(nl, i + 1); if (o === OP.LDL) push = 1; else pop = 1; break; }
       case OP.NEG: case OP.ABS: case OP.NOT: pop = 1; push = 1; break;
       case OP.MULDIV: pop = 3; push = 1; break;
       case OP.ADD: case OP.SUB: case OP.MUL: case OP.DIV: case OP.MOD: case OP.MIN: case OP.MAX:
       case OP.EQ: case OP.NE: case OP.LT: case OP.LE: case OP.GT: case OP.GE: pop = 2; push = 1; break;
-      case OP.CTX: { const f = rd8(c, r); need(f < CTX_FIELDS, 'BadOperand'); if ([C.VALUE, C.PRICE, C.PROGRESS, C.MCAP, C.RAISED, C.FEE].includes(f as never)) flags |= F.CURVE; push = 1; break; }
+      case OP.CTX: { const f = rd8(c, r); need(f < CTX_FIELDS, 'BadOperand'); w = (w as number) + extraCtx(f); if ([C.VALUE, C.PRICE, C.PROGRESS, C.MCAP, C.RAISED, C.FEE].includes(f as never)) flags |= F.CURVE; push = 1; break; }
       case OP.WAL: { const side = rd8(c, r); const f = rd8(c, r); flags |= sideFlags(side); need(f < WAL_FIELDS, 'BadOperand'); push = 1; break; }
       case OP.WIN: { const side = rd8(c, r); const dir = rd8(c, r); flags |= sideFlags(side); need(dir <= 1, 'BadOperand'); pop = 1; push = 1; break; }
-      case OP.CLOCK: { const f = rd8(c, r); rd16(c, r); const rule = rd8(c, r); need(f < CLOCK_FIELDS && rule <= 3, 'BadOperand'); push = 1; break; }
+      case OP.CLOCK: { const f = rd8(c, r); rd16(c, r); const rule = rd8(c, r); need(f < CLOCK_FIELDS && rule <= 3, 'BadOperand'); w = (w as number) + extraClock(f, rule); push = 1; break; }
       case OP.DAYLIGHT: rd16(c, r); rd16(c, r); push = 1; break;
       case OP.MOON: { const f = rd8(c, r); need(f < MOON_FIELDS, 'BadOperand'); push = 1; break; }
       case OP.DECAY: pop = 4; push = 1; break;

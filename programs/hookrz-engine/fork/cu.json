@@ -6,11 +6,11 @@
   },
   "sell": {
    "engine": 2661,
-   "tx": 14302
+   "tx": 15802
   },
   "send": {
    "engine": 2643,
-   "tx": 15784
+   "tx": 14284
   }
  },
  "rows": [
@@ -99,31 +99,31 @@
   },
   {
    "what": "custom:empty",
-   "buy": 5494,
-   "sell": 5528,
-   "send": 6480,
-   "marginal": 3837
+   "buy": 5504,
+   "sell": 5539,
+   "send": 6490,
+   "marginal": 3847
   },
   {
    "what": "custom:feegate",
-   "buy": 8111,
-   "sell": 7821,
-   "send": 8773,
-   "marginal": 6130
+   "buy": 8137,
+   "sell": 7840,
+   "send": 8791,
+   "marginal": 6148
   },
   {
    "what": "custom:koth",
-   "buy": 6903,
-   "sell": 6424,
-   "send": 7139,
-   "marginal": 4496
+   "buy": 6593,
+   "sell": 6439,
+   "send": 7165,
+   "marginal": 4522
   },
   {
    "what": "custom:heavy",
-   "buy": 15984,
-   "sell": 16156,
-   "send": 17567,
-   "marginal": 14924
+   "buy": 9952,
+   "sell": 10086,
+   "send": 11440,
+   "marginal": 8797
   },
   {
    "what": "trading-hours",
@@ -137,48 +137,158 @@
   {
    "what": "hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + rising-max",
    "buy": 6763,
-   "buyTx": 38882,
+   "buyTx": 31382,
    "sell": 6771,
-   "sellTx": 38890,
+   "sellTx": 35890,
    "send": 6688,
-   "sendTx": 40308
+   "sendTx": 29808
   },
   {
    "what": "hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + anti-bundle + snipe-shield",
    "buy": 6528,
-   "buyTx": 32647,
+   "buyTx": 28147,
    "sell": 6675,
    "sellTx": 29794,
    "send": 6402,
-   "sendTx": 35522
+   "sendTx": 31022
   },
   {
    "what": "hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + custom:koth",
-   "buy": 8970,
-   "buyTx": 56186,
-   "sell": 8759,
-   "sellTx": 33475,
-   "send": 8206,
-   "sendTx": 34423
+   "buy": 8660,
+   "buyTx": 42376,
+   "sell": 8774,
+   "sellTx": 37990,
+   "send": 8232,
+   "sendTx": 38949
   },
   {
    "what": "hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + custom:heavy",
-   "buy": 18502,
-   "buyTx": 40218,
-   "sell": 18942,
-   "sellTx": 46658,
-   "send": 19085,
-   "sendTx": 49802
+   "buy": 12294,
+   "buyTx": 38510,
+   "sell": 12696,
+   "sellTx": 49412,
+   "send": 12782,
+   "sendTx": 38999
   },
   {
    "what": "hold-timer + circuit-breaker + anti-bundle + rising-max + creator-vest + custom:heavy",
-   "buy": 18850,
-   "buyTx": 48066,
-   "sell": 18781,
-   "sellTx": 41997,
-   "send": 19399,
-   "sendTx": 48616
+   "buy": 12642,
+   "buyTx": 35858,
+   "sell": 12535,
+   "sellTx": 44751,
+   "send": 13096,
+   "sendTx": 37813
   }
  ],
- "max": 19399
+ "examples": [
+  {
+   "stack": "hot-potato",
+   "label": "buy: catches the potato",
+   "engine": 7438,
+   "verdict": "ok"
+  },
+  {
+   "stack": "hot-potato",
+   "label": "send: passes the potato",
+   "engine": 9217,
+   "verdict": "ok"
+  },
+  {
+   "stack": "hot-potato",
+   "label": "buy: burns the holder and catches",
+   "engine": 8633,
+   "verdict": "ok"
+  },
+  {
+   "stack": "hot-potato",
+   "label": "buy refused: burnt wallet (reason with a duration)",
+   "engine": 10199,
+   "verdict": 6128
+  },
+  {
+   "stack": "hot-potato",
+   "label": "sell refused: holding the potato",
+   "engine": 11275,
+   "verdict": 6128
+  },
+  {
+   "stack": "5 heavy blocks + hot-potato",
+   "label": "buy: catches the potato",
+   "engine": 9493,
+   "verdict": "ok"
+  },
+  {
+   "stack": "5 heavy blocks + hot-potato",
+   "label": "send: passes the potato",
+   "engine": 10262,
+   "verdict": "ok"
+  },
+  {
+   "stack": "5 heavy blocks + hot-potato",
+   "label": "buy: burns the holder and catches",
+   "engine": 10718,
+   "verdict": "ok"
+  },
+  {
+   "stack": "5 heavy blocks + hot-potato",
+   "label": "buy refused: burnt wallet (reason with a duration)",
+   "engine": 12149,
+   "verdict": 6128
+  },
+  {
+   "stack": "5 heavy blocks + hot-potato",
+   "label": "sell refused: holding the potato",
+   "engine": 13424,
+   "verdict": 6128
+  },
+  {
+   "stack": "koth-example",
+   "label": "buy: takes the crown",
+   "engine": 8271,
+   "verdict": "ok"
+  },
+  {
+   "stack": "koth-example",
+   "label": "buy: outbids the faded bar",
+   "engine": 8399,
+   "verdict": "ok"
+  },
+  {
+   "stack": "koth-example",
+   "label": "send refused: the king (reason with a duration)",
+   "engine": 10895,
+   "verdict": 6128
+  },
+  {
+   "stack": "koth-example",
+   "label": "sell: not the king",
+   "engine": 6339,
+   "verdict": "ok"
+  },
+  {
+   "stack": "5 heavy blocks + koth-example",
+   "label": "buy: takes the crown",
+   "engine": 10326,
+   "verdict": "ok"
+  },
+  {
+   "stack": "5 heavy blocks + koth-example",
+   "label": "buy: outbids the faded bar",
+   "engine": 10439,
+   "verdict": "ok"
+  },
+  {
+   "stack": "5 heavy blocks + koth-example",
+   "label": "send refused: the king (reason with a duration)",
+   "engine": 11813,
+   "verdict": 6128
+  },
+  {
+   "stack": "5 heavy blocks + koth-example",
+   "label": "sell: not the king",
+   "engine": 8616,
+   "verdict": "ok"
+  }
+ ],
+ "max": 13424
 }

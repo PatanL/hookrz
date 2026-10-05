@@ -13,28 +13,44 @@ export const OP_NAME: Record<number, string> = Object.fromEntries(Object.entries
 
 const GAS: Record<number, number> = {};
 const set = (ops: number[], g: number) => { for (const o of ops) GAS[o] = g; };
-set([OP.END, OP.REFUSE], 40);
-set([OP.REFUSEV], 45);
-set([OP.JMP, OP.JZ, OP.JNZ], 16);
-set([OP.POP, OP.DUP], 10);
-set([OP.PUSHI, OP.PUSHR], 30);
-set([OP.LDL, OP.STL], 12);
-set([OP.ADD, OP.SUB, OP.NEG, OP.ABS, OP.MIN, OP.MAX, OP.NOT], 14);
-set([OP.EQ, OP.NE, OP.LT, OP.LE, OP.GT, OP.GE], 14);
-set([OP.MUL], 60);
-set([OP.DIV, OP.MOD, OP.MULDIV], 160);
-set([OP.CTX, OP.WAL], 120);
-set([OP.WIN], 220);
-set([OP.CLOCK], 520);
-set([OP.DAYLIGHT], 700);
-set([OP.MOON], 800);
-set([OP.DECAY], 900);
-set([OP.RINGTICK], 320);
-set([OP.RINGAT], 240);
-set([OP.LDG, OP.LDW], 45);
-set([OP.STG, OP.STW], 50);
-set([OP.KEQ], 90);
-set([OP.KSTG, OP.KSTW], 80);
+// Measured on sBPF (vm/bench/cu.ts) plus ~15%; mirrors vm/src/op.rs.
+set([OP.END, OP.REFUSE], 60);
+set([OP.REFUSEV], 70);
+set([OP.JMP], 70);
+set([OP.JZ, OP.JNZ], 85);
+set([OP.POP], 40);
+set([OP.DUP], 60);
+set([OP.PUSHI, OP.PUSHR], 85);
+set([OP.LDL], 65);
+set([OP.STL], 70);
+set([OP.ADD, OP.SUB, OP.EQ, OP.NE, OP.LT, OP.LE, OP.GT, OP.GE], 80);
+set([OP.NEG, OP.ABS], 75);
+set([OP.MIN, OP.MAX], 85);
+set([OP.NOT], 60);
+set([OP.MOD], 95);
+set([OP.MUL, OP.DIV, OP.MULDIV], 280);
+set([OP.CTX], 105);
+set([OP.WAL], 135);
+set([OP.WIN], 330);
+set([OP.CLOCK], 155);
+set([OP.DAYLIGHT], 550);
+set([OP.MOON], 375);
+set([OP.DECAY], 810);
+set([OP.RINGTICK], 240);
+set([OP.RINGAT], 270);
+set([OP.LDG], 135);
+set([OP.STG], 140);
+set([OP.LDW, OP.STW], 160);
+set([OP.KEQ], 195);
+set([OP.KSTG], 160);
+set([OP.KSTW], 170);
+/** Gas before the first op: header parse + copying state in and out (RUN_BASE + 30 × reasons). */
+export const RUN_BASE = 450;
+export const RUN_PER_REASON = 30;
+export const runBase = (nReasons: number) => RUN_BASE + RUN_PER_REASON * nReasons;
+export const extraPush = (len: number) => 15 * len;
+export const extraCtx = (f: number) => (f === 2 || f === 11 ? 200 : 0);
+export const extraClock = (f: number, rule: number) => (f >= 4 && f <= 6 ? 100 : f === 7 ? 180 : 0) + (rule !== 0 ? 450 : 0);
 /** CU charged per execution of an op, or undefined if not an opcode. */
 export const gasOf = (op: number): number | undefined => GAS[op];
 

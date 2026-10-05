@@ -27,28 +27,31 @@ Contents: [Language](#1-language) · [Read surface](#2-read-surface) · [State](
 ## 1. Language
 
 ```hookscript
-rule "King of the Hill"                    # required first line: the rule's name
-timezone "America/New_York"                # optional: default zone for clock.*
+rule "King of the Hill"
+# The biggest buy takes the crown. To take it you have to beat the king's buy, and that bar fades
+# to zero over 6h. While crowned, the king can't sell or send; the crown (and the lock) lapses 6h after
+# the coronation unless someone outbids. The keeper streams half the creator fees to the king.
 
-global king: key                           # coin globals (typed slots in Script.globals)
+global king: key
 global bar: num
 global crowned_at: time
-wallet crowned: bool                       # per-wallet var (in each Wallet record)
+global reigns: int
 
-payout 50% to king                         # read by the keeper; no effect on chain
+payout 50% to king
 
 on buy {
-  let need = max(fade(bar, over: 6h, since: crowned_at), 1)
+  let need = fade(bar, over: 6h, since: crowned_at)
   if amount > need {
     set king = buyer
     set bar = amount
     set crowned_at = clock.now
+    set reigns += 1
   }
 }
 
 on sell, send {
   refuse if wallet == king and since(crowned_at) < 6h
-    because "The king can't sell or send for {6h - since(crowned_at)}: someone has to outbid you"
+    because "You're the king: no selling or sending for {6h - since(crowned_at)}, unless someone outbids you"
 }
 ```
 
@@ -56,7 +59,7 @@ on sell, send {
 ```
 program  := 'rule' STRING NL  header*  section*
 header   := 'timezone' STRING
-          | 'global' NAME ':' type ['=' literal]       # coin global
+          | 'global' NAME ':' type                     # coin global (starts at 0 / false / none)
           | 'wallet' ['var'] NAME ':' type              # per-wallet var
           | 'payout' PERCENT 'to' NAME ['as' 'pot']    # keeper payout (stream or pot)
           | 'payout' PERCENT 'to' 'wallets' 'where' NAME  # keeper split
@@ -75,7 +78,8 @@ type     := num | int | time | bool | key
 | `refuse if cond because "message {expr}"` | Refuse when `cond` holds. `because` may sit on the next line. One `{expr}` placeholder is allowed. Its value is shown with the unit the compiler infers: tokens, duration (`1h 30m`), time (`2026-10-04 18:00 UTC`) or percent. |
 | `refuse because "…"` | Refuse unconditionally, usually inside an `if`. |
 | `allow` · `allow if cond` | Stop here and allow (state is kept). Useful as an escape hatch: `allow if wallet.is_creator`. |
-| `if cond { … } else if cond { … } else { … }` | Branching. |
+| `if cond { … } else if cond { … } else { … }` | Branching. One-liners: `if cond then stmt`, `if cond: stmt`. |
+| `refuse unless cond because "…"` | Same as `refuse if not cond`. |
 
 Undeclared globals and wallet vars may be introduced by their first `set`. The type is inferred from the value: a number
 gives `num`, a time gives `time`, a bool gives `bool`, a key gives `key`. Declare them explicitly to pick compact types
@@ -113,8 +117,8 @@ cannot be used in arithmetic.
 | `min(a, b, …)` · `max(a, b, …)` · `abs(x)` · `clamp(x, lo, hi)` | |
 | `decay(x, rate: 1%, every: 1m, since: t)` | `x × (1 − rate)^floor(since(t) / every)`, exponential decay |
 | `fade(x, over: 6h, since: t)` | `x × max(0, over − since(t)) / over`, linear decay to 0 |
-| `daylight(tz: "Asia/Tokyo")` · `daylight(lat: 35.68, lon: 139.69)` | true while the sun is up there (solar altitude > −0.833°, within ~2 min of NOAA) |
-| `moon_phase()` (= `moon.phase`) · `moon.illumination` (0–1) · `moon.age` (days) | Moon phase from the clock with the main lunar perturbations (±~40 min). The principal phases `new`, `first_quarter`, `full` and `last_quarter` are 24-hour windows centred on the exact moment. |
+| `daylight(tz: "Asia/Tokyo")` · `daylight(lat: 35.68, lon: 139.69)` | true while the sun is up there (solar altitude > −0.833°). Sunrise and sunset fall within a few minutes of published times (≤ 10 min, tested) |
+| `moon_phase()` (= `moon.phase`) · `moon.illumination` (0–1) · `moon.age` (days) | Moon phase from the clock with the main lunar perturbations: full-moon instants within 25 min of the 2025 almanac (tested). The principal phases `new`, `first_quarter`, `full` and `last_quarter` are 24-hour windows centred on the exact moment. |
 | `clock.hour(tz: "Asia/Tokyo")` (any `clock` field) | that field in that zone, DST included |
 | `curve.price_at(ago: 10m)` | the coin's own price sample from about `ago` back (see [rings](#price-rings)) |
 | `wallet.received(window: 1h)` · `wallet.sent(window: 1h)` (alias `sold(window:)`) | tokens in or out of this account within the window, from the record's last 5 lots |
@@ -212,12 +216,18 @@ The VM works on copies. **Globals and both wallet areas are written back only on
 ### ABI (layout JSON)
 The compiler emits the layout next to the bytecode, so the keeper, indexer and site can decode state:
 ```json
-{ "globals": [{ "name": "king", "type": "key", "offset": 0, "size": 32 }, …],
-  "wallet":  [{ "name": "crowned", "type": "bool", "offset": 0, "size": 1 }],
-  "rings":   [{ "ago": 600, "bucket": 150, "offset": 44 }],
-  "payouts": [{ "share_bps": 5000, "to": "king", "mode": "stream" }],
-  "reasons": ["The king can't sell or send for {}: …"] }
+{ "name": "King of the Hill", "timezone": "UTC",
+  "globals": [ {"name": "king", "type": "key", "offset": 0, "size": 32},
+               {"name": "bar", "type": "num", "offset": 32, "size": 8},
+               {"name": "crowned_at", "type": "time", "offset": 40, "size": 4},
+               {"name": "reigns", "type": "int", "offset": 44, "size": 4} ],
+  "wallet": [], "rings": [],
+  "payouts": [ {"share_bps": 5000, "to": "king", "mode": "stream"} ],
+  "reasons": [ "You're the king: no selling or sending for {}, unless someone outbids you" ],
+  "needs": { "walletV2": false, "app": false } }
 ```
+(That is the real output for `examples/king-of-the-hill.hs`. A wallet var looks like `{"name": "hat", "type": "bool", "offset": 0, "size": 1}`, and a
+ring looks like `{"ago": 600, "bucket": 150, "offset": 44}`.)
 
 ---
 
@@ -262,41 +272,45 @@ fmt: `0` none, `1` number, `2` integer, `3` duration, `4` time, `5` percent.
 ## 5. Op set
 
 `[a b → c]` shows the stack effect, with the top of the stack on the right. All arithmetic saturates at the `i64` bounds. A divisor of 0 gives 0.
+**CU** is the gas weight, measured on sBPF (see §6). Some ops add an operand-dependent extra.
 
 | Op | Hex | Operands | Stack | Semantics | CU |
 |---|---|---|---|---|---|
-| END | 00 | – | – | Allow | 40 |
-| REFUSE | 01 | r u8 | – | Refuse{r, arg 0} | 40 |
-| REFUSEV | 02 | r u8 | [v →] | Refuse{r, arg v} | 45 |
-| JMP | 04 | off u16 | – | pc += off | 16 |
-| JZ / JNZ | 05 / 06 | off u16 | [c →] | jump if c == 0 / ≠ 0 | 16 |
-| POP / DUP | 07 / 08 | – | [a →] / [a → a a] | | 10 |
-| PUSHI | 09 | varint v | [→ v·10⁶] | integer constant | 30 |
-| PUSHR | 0A | varint v | [→ v] | raw constant (fractions, bools, enums) | 30 |
-| LDL / STL | 0B / 0C | i u8 (< 32) | [→ x] / [x →] | locals, initially 0 | 12 |
-| ADD SUB | 10 11 | – | [a b → c] | saturating | 14 |
-| MUL | 12 | – | [a b → a·b/10⁶] | i128 intermediate, truncates toward 0 | 60 |
-| DIV | 13 | – | [a b → a·10⁶/b] | b = 0 → 0 | 160 |
-| MOD | 14 | – | [a b → a % b] | sign of a; b = 0 → 0 | 160 |
-| NEG ABS | 15 16 | – | [a → c] | saturating | 14 |
-| MIN MAX | 17 18 | – | [a b → c] | | 14 |
-| MULDIV | 19 | – | [a b c → a·b/c] | i128, c = 0 → 0 | 160 |
-| NOT | 1A | – | [a → a == 0] | | 14 |
-| EQ NE LT LE GT GE | 20–25 | – | [a b → 0/1] | signed | 14 |
-| CTX | 30 | f u8 | [→ v] | context field, table below | 120 |
-| WAL | 31 | side u8, f u8 | [→ v] | wallet field, table below | 120 |
-| WIN | 32 | side u8, dir u8 | [d → sum] | lots (dir 0 in, 1 out) with `launch_ts + t ≥ now − floor(d/10⁶)` | 220 |
-| CLOCK | 33 | f u8, tz i16 (std offset, minutes), rule u8 | [→ v] | f: 0 hour, 1 minute, 2 second, 3 weekday, 4 day, 5 month, 6 year, 7 day_of_year, 8 minute_of_day. rule: 0 none, 1 US, 2 EU, 3 AU | 520 |
-| DAYLIGHT | 34 | lat i16, lon i16 (1/100°) | [→ 0/1] | sun above −0.833° | 700 |
-| MOON | 35 | f u8 | [→ v] | 0 phase, 1 illumination, 2 age (days) | 800 |
-| DECAY | 36 | – | [x rate elapsed every → y] | `x·(1−clamp(rate,0,1))^min(floor(elapsed/every), 2³¹−1)` by squaring, truncating each step | 900 |
-| RINGTICK | 37 | off u8, w u32 (s) | – | update the price ring at `off` | 320 |
-| RINGAT | 38 | off u8, w u32 | [→ p] | ring lookup | 240 |
-| LDG / STG | 40 / 41 | ty u8, off u8 | [→ v] / [v →] | typed global | 45 / 50 |
-| LDW / STW | 42 / 43 | side u8, ty u8, off u8 | [→ v] / [v →] | typed wallet var | 45 / 50 |
-| KEQ | 44 | kindA u8, argA u8, kindB u8, argB u8 | [→ 0/1] | 32-byte key compare | 90 |
-| KSTG | 45 | off u8, kind u8, arg u8 | – | globals[off..off+32] = key | 80 |
-| KSTW | 46 | side u8, off u8 (0), kind u8, arg u8 | – | wallet var = key | 80 |
+| END | 00 | – | – | Allow | 60 |
+| REFUSE | 01 | r u8 | – | Refuse{r, arg 0} | 60 |
+| REFUSEV | 02 | r u8 | [v →] | Refuse{r, arg v} | 70 |
+| JMP | 04 | off u16 | – | pc += off | 70 |
+| JZ / JNZ | 05 / 06 | off u16 | [c →] | jump if c == 0 / ≠ 0 | 85 |
+| POP / DUP | 07 / 08 | – | [a →] / [a → a a] | | 40 / 60 |
+| PUSHI | 09 | varint v | [→ v·10⁶] | integer constant | 85 + 15/byte |
+| PUSHR | 0A | varint v | [→ v] | raw constant (fractions, bools, enums) | 85 + 15/byte |
+| LDL / STL | 0B / 0C | i u8 (< 32) | [→ x] / [x →] | locals, initially 0 | 65 / 70 |
+| ADD SUB | 10 11 | – | [a b → c] | saturating | 80 |
+| MUL | 12 | – | [a b → a·b/10⁶] | exact 128-bit intermediate, truncates toward 0 | 280 |
+| DIV | 13 | – | [a b → a·10⁶/b] | b = 0 → 0 | 280 |
+| MOD | 14 | – | [a b → a % b] | sign of a; b = 0 → 0 | 95 |
+| NEG ABS | 15 16 | – | [a → c] | saturating | 75 |
+| MIN MAX | 17 18 | – | [a b → c] | | 85 |
+| MULDIV | 19 | – | [a b c → a·b/c] | exact 128-bit, c = 0 → 0 | 280 |
+| NOT | 1A | – | [a → a == 0] | | 60 |
+| EQ NE LT LE GT GE | 20–25 | – | [a b → 0/1] | signed | 80 |
+| CTX | 30 | f u8 | [→ v] | context field, table below | 105 (+200 value, mcap) |
+| WAL | 31 | side u8, f u8 | [→ v] | wallet field, table below | 135 |
+| WIN | 32 | side u8, dir u8 | [d → sum] | lots (dir 0 in, 1 out) with `launch_ts + t ≥ now − floor(d/10⁶)` | 330 |
+| CLOCK | 33 | f u8, tz i16 (std offset, minutes), rule u8 | [→ v] | f: 0 hour, 1 minute, 2 second, 3 weekday, 4 day, 5 month, 6 year, 7 day_of_year, 8 minute_of_day. rule: 0 none, 1 US, 2 EU, 3 AU | 155 (+100 f 4–6, +180 f 7, +450 DST rule) |
+| DAYLIGHT | 34 | lat i16, lon i16 (1/100°) | [→ 0/1] | sun above −0.833° | 550 |
+| MOON | 35 | f u8 | [→ v] | 0 phase, 1 illumination, 2 age (days) | 375 |
+| DECAY | 36 | – | [x rate elapsed every → y] | `x·(1−clamp(rate,0,1))^min(floor(elapsed/every), 2³¹−1)` by squaring, truncating each step | 810 |
+| RINGTICK | 37 | off u8, w u32 (s) | – | update the price ring at `off` | 240 |
+| RINGAT | 38 | off u8, w u32 | [→ p] | ring lookup | 270 |
+| LDG / STG | 40 / 41 | ty u8, off u8 | [→ v] / [v →] | typed global | 135 / 140 |
+| LDW / STW | 42 / 43 | side u8, ty u8, off u8 | [→ v] / [v →] | typed wallet var | 160 |
+| KEQ | 44 | kindA u8, argA u8, kindB u8, argB u8 | [→ 0/1] | 32-byte key compare | 195 |
+| KSTG | 45 | off u8, kind u8, arg u8 | – | globals[off..off+32] = key | 160 |
+| KSTW | 46 | side u8, off u8 (0), kind u8, arg u8 | – | wallet var = key | 170 |
+
+Before the first op, `run` charges **450 + 30 × n_reasons**. This covers the header and reason-table parse and copying the globals and wallet vars in and
+out. An op's base weight is charged when it is fetched. Its extra is charged after its operands are decoded and before it executes.
 
 **Types** `ty`: 0 num, 1 int, 2 time, 3 bool. **Sides:** 0 sender, 1 receiver, 2 trader (receiver on buy, else sender),
 3 other (sender on buy, else receiver). **Key refs** `(kind, arg)`: kind 0 ctx, where arg is 0 zero, 1 sender, 2 receiver, 3 trader,
@@ -326,19 +340,27 @@ mean elongation plus 5 periodic terms. `math.rs` is the normative definition, an
 
 ## 6. Cost model
 
-Each op has a fixed CU weight (table above). The weights are upper bounds on the sBPF instructions the VM executes for
-that op: decode, bounds checks, dispatch and the op's work. Calibration is described in `STATUS.md`. Parsing the header costs a fixed
-**~250 CU**. The engine's work to fill `Ctx` is not included; it is counted in the engine's per-block budget.
+Gas is denominated in **sBPF compute units** and is an upper bound on what `run` really costs. That covers the whole call: parse,
+ops, state copies and commit. It does not cover the engine's work to fill `Ctx`, or `format_reason`, which runs only on a refusal.
 
-* **Static worst case:** `verify` and the compiler compute the most expensive path through the DAG of forward jumps, and
-  write it to the header as `gas_max`. A script with `gas_max > 8,000` does not compile.
-* **Dynamic meter:** `run` charges every executed op and returns `OutOfGas` past 8,000. A verified script can never get
-  there.
-* The site's Custom block budget line (5,000 CU) is the typical cost. 8,000 is the hard ceiling.
+* **Calibration.** `vm/bench/` is an sBPF program that runs a script with a per-op tracer
+  (`sol_remaining_compute_units` around every op). `vm/bench/cu.ts` drives it on LiteSVM in two sets:
+  - synthetic worst cases for every op and variant: 10-byte varints, 128-bit multiply-divide slow paths, five
+    in-window lots, every CLOCK field × DST rule, 2³¹ decay periods, ring resets, equal 32-byte keys, and 16 reasons + 4 keys;
+  - 60 real transfers of every example.
 
-Typical costs: the site's "no sell over 25% in the first 2h" is ~600 CU worst case, and King of the Hill is ~1,500.
-
----
+  Each weight is the measured maximum plus about 15%. Across all 1,464 runs, real CU ≤ gas charged: the largest real/gas
+  ratio is 0.905 and the smallest margin is 144 CU. Results are in `vm/bench/cu.json`.
+* **The VM avoids sBPF libcalls.** Overflow-checked `*`, signed `/` and 128-bit division compile to slow
+  runtime calls on sBPF. The VM uses unsigned division, domain-proven `wrapping_mul` and a Hacker's-Delight 128/64
+  division, so a `WIN` read costs about 290 CU and `DAYLIGHT` about 480. The results are bit-identical to the i128 reference
+  (checked on 30M random and edge inputs).
+* **Static worst case.** `verify` and the compiler compute the most expensive path through the DAG of forward jumps, base
+  charge included, and write it to the header as `gas_max`. A script with `gas_max > 8,000` does not compile.
+* **Dynamic meter.** `run` charges every op as it executes and returns `OutOfGas` past 8,000. A verified script can never
+  get there: 4.2M verified random programs were checked to finish within their static `gas_max`.
+* Examples fall between 1,330 CU (last-call) and 7,155 CU (hot-potato) worst case. Typical runs cost 1,000–3,000 CU. The site's Custom block
+  line (5,000 CU) is a typical figure; 8,000 is the hard ceiling.
 
 ## 7. Limits
 | Limit | Value |
@@ -349,8 +371,7 @@ Typical costs: the site's "no sell over 25% in the first 2h" is ~600 CU worst ca
 | Constant keys | 4 |
 | Reasons | 16, ≤ 96 bytes each, one `{}` |
 | Globals / wallet vars | 256 / 32 bytes |
-| Pending forward jump targets during `verify` | 64 (the compiler stays far below) |
-| Nesting | `if` depth ≤ 8 |
+| Pending forward jump targets during `verify` | 64. Deeper nesting of conditions is rejected at compile time |
 
 ---
 
@@ -394,14 +415,15 @@ pub struct Ctx {
   needs the instructions sysvar in the ExtraAccountMetaList. Without it, leave zeros.
 * `sender` and `receiver`: `key` is the token account owner, and `is_pool` is set for the base vault side. The other fields come from the Wallet
   record if there is one. **Balances are before the transfer.** Token-2022 calls the hook after moving the tokens, so use
-  `source.amount + amount` and `destination.amount − amount`. `lots_in` is the record's receipt lots (WALLET_LAYOUT `lots`).
-  **Requested additions to WALLET_LAYOUT** for the hookedpad-parity reads: `bought u64, sold u64, buys u32, sells u32,
-  last_buy_ts i64` and 5 outflow lots. Until they exist, pass 0: scripts that read them see 0. The fuzzer models
-  them, so the semantics are fixed now.
+  `source.amount + amount` and `destination.amount − amount`. `lots_in` is the record's receipt lots (WALLET_LAYOUT `lots`,
+  unspent receipts consumed oldest-first). `lots_out` holds the last 5 outflows. `bought`, `sold`, `buys`, `sells` and `last_buy_ts`
+  are the record's counters. hookrz_engine fills all of these, and the fuzzer models them the same way.
 * `same_wallet` is true when source == destination token account. Pass the record as `wallet_src` and `&mut []` as
   `wallet_dst`.
 * `wallet_src` / `wallet_dst` are the 32-byte script-var areas of the two Wallet records. Pass `&mut []` when a side has no
   record (pool vault side, or not opened).
+* `globals` may be the first `globals_len` bytes of `Script.globals` (header offset 10). `verify` proves that every access stays
+  inside it.
 * Run it **after** the prebuilt blocks, as in ENGINE-SPEC. On `Refuse{reason_id, arg}`, `msg!` the
   `format_reason` text and fail with **6128 CustomRuleRefused**. On `Allow`, the VM has already written globals and wallet vars
   into the slices. Persist them with the rest of the state.
@@ -456,15 +478,37 @@ Every compiled script, drafted or hand-written, goes through `fuzz/`:
 * **Honeypot check:** at the end of each fuzz run, for every holder, the checker simulates an exit with **nobody else trading**. It tries
   to sell the full balance, then 50%, 25%, 10%, 1% and 1 token, at times stepping out to +60 days (odd and even seconds,
   day and night, weekdays and weekends, every moon phase). Allowed sells are applied with their state writes. A script is
-  **flagged** if any holder can't get below 1% of their bag. It is also flagged if fuzzing refused every sell. A flag is a hard failure for
-  drafts. The drafter retries, and the site shows the reason.
+  **flagged** if any holder can't get below 1% of their bag.
+* **Bank run:** for the first launches, every holder exits in turn, biggest bag first, in one shared world. This catches rules
+  that depend on the price staying high or on other people acting. It is the case where "sell only above 2× launch price"
+  traps the last holders out.
+* A script is also flagged if fuzzing refused every sell. A flag is a hard failure for drafts. The drafter retries with the
+  findings, and the site shows the reason. `fuzz/honeypots/` holds 6 planted honeypots, and all are flagged.
 
 ## 10. Toolchain
-| Piece | Path | Run |
+| Piece | Path | Run (from `hookscript/`) |
 |---|---|---|
-| VM (Rust, no_std) | `vm/` | `cargo test --release` · sBPF: see ENGINE-SPEC build line |
-| Parity runner | `vm/examples/hsrun.rs` | `cargo run --release --example hsrun < cases.txt` |
-| Compiler + reference interpreter (TS, Node 22) | `compiler/src/` | `node compiler/bin/hsc.ts file.hs` |
-| Fuzzer + honeypot | `fuzz/` | `node fuzz/run.ts examples/*.hs` |
-| Drafter | `drafter/` | `node drafter/cli.ts "English rule"` |
-| Examples | `examples/*.hs` | |
+| VM (Rust, no_std) | `vm/` | `cd vm && cargo test --release`. sBPF: the ENGINE-SPEC build line |
+| Parity runner | `vm/examples/hsrun.rs` + `compiler/test/parity.ts` | `node compiler/test/parity.ts --cases 1000` |
+| CU calibration | `vm/bench/` | build the bench `.so` for sBPF, then `node vm/bench/cu.ts` |
+| Compiler + reference interpreter (TS, Node ≥ 22.6, no deps) | `compiler/src/` | `node compiler/bin/hsc.ts [--listing\|--json\|--hex] file.hs` · `--rehead file.hex` |
+| Compiler tests | `compiler/test/compiler.test.ts` | `node compiler/test/compiler.test.ts` |
+| Fuzzer + honeypot | `fuzz/` | `node fuzz/run.ts [--trades N] [--json out] examples/*.hs` |
+| Drafter | `drafter/` | `node drafter/cli.ts [--offline] "English rule"` |
+| Examples | `examples/*.hs` | 22 scripts |
+
+### Drafter API
+```ts
+import { draft } from './drafter/draft.ts';
+const d = await draft('Every 100th buy wins the jackpot', { provider: 'auto' /* | 'anthropic' | 'heuristic' */ });
+// d: { ok, prompt, script, bytecodeHex, bytes, ops, cu /* static worst case */,
+//      fuzz: { trades, refusedPct, panics, maxCu /* seen */, avgCu, errors, byKind, byReason, rust },
+//      honeypot: { ok, locked[], bankRun?, notes[] }, warnings[], errors[], abi, reviewed: false,
+//      provider: 'anthropic' | 'heuristic', model, template, attempts[] }
+```
+* **Providers.** The Anthropic provider uses the official SDK (`@anthropic-ai/sdk`, an optional dependency) and runs when
+  `ANTHROPIC_API_KEY` is set. The model is `HOOKSCRIPT_MODEL`, defaulting to `claude-opus-5-5`; `claude-sonnet-5-5` also works.
+  The system prompt is this spec plus every example, prompt-cached. The provider uses the server-side refusal fallback
+  (`fallbacks: "default"`). Without a key, the offline provider fills in templates for the example families.
+* **Checks.** Every draft is compiled, fuzzed (10,000 trades) and honeypot-checked. A failure is sent back to the model with
+  the compiler errors (line, column, the source line) or the honeypot findings, for up to 3 attempts.

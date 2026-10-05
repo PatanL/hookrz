@@ -1,6 +1,6 @@
 # hookrz_engine status
 
-_Updated 2026-10-04 19:40._
+_Updated 2026-10-04 19:50._
 
 - **Program id (local fork):** `EiZ3npNmrPCkAjskdMR7RDJQcojC9p8CHNr1dR4DPxKr`. The keypair `program-keypair.json` is local only
   (gitignored: a public keypair would let anyone deploy to the address first). Use a fresh one for devnet/mainnet.
@@ -18,7 +18,15 @@ _Updated 2026-10-04 19:40._
    blocks (→ 6128, reason text in the log), globals and wallet vars persist on Allow. Script account layout from
    hookscript/SPEC.md §8. Wallet record grew to 328 bytes with the fields SPEC.md §8 asked for (bought, sold, buys, sells,
    last_buy_ts, outflow lots). Scripts too big for the launch tx are staged with `write_script` (0xA4) and sealed by init_stack.
-5. CU measured in LiteSVM (below): worst case **19,399 CU** (budget 30,000).
+5. CU measured in LiteSVM (below): worst case **13,424 CU** (budget 30,000): the five heaviest blocks plus the compiled
+   `hot-potato.hs` refusing a sell with its formatted reason. The heaviest transfer that lands is 12,782 CU.
+
+Final VM (19:50): linked against HOOKSCRIPT's calibrated VM (gas includes the `450 + 30 × reasons` setup charge, cap 8,000).
+The engine API use was already final: `verify` at init_stack, `Refuse { reason_id, arg }` → `format_reason(code, id, arg)` in
+the log. Fixtures replaced with hookscript/vm/fixtures (`heavy` is now 15 window reads at gas 7,725) plus the compiled
+`koth-example.hex` (examples/king-of-the-hill.hs) and `hot-potato.hex`; `tests/fixtures.rs` checks every fixture still
+passes the linked `verify`. A fork test runs both compiled examples on chain. BACKEND's `cd server && npm test`: 16/16 pass
+on this .so.
 
 Any deployed address (19:40): every owner and PDA check uses the runtime `program_id` passed to the entrypoint. The one
 hard-coded use (`&ID` in the Script owner check) is gone; `declare_id!` stays only as the local-fork default for off-chain
@@ -41,11 +49,11 @@ Follow-ups done (coordinator, 19:05):
   activation point into the Stack; `fee_bps` is the scheduler's current base fee (linear or exponential). The dynamic fee and
   the rate limiter's size-dependent part are not included. Fork test: a script refuses buys while the fee is above 10%.
 
-Fork tests (LiteSVM with the mainnet Token-2022 + ATA binaries and stand-in DBC pool/config accounts): **16 pass**, covering
+Fork tests (LiteSVM with the mainnet Token-2022 + ATA binaries and stand-in DBC pool/config accounts): **17 pass** (and 17 at a random program address), covering
 every block's refusal and pass path, C1 (direct Execute → 6000), creator-only init, re-init (6143), bad params, the creator
 launch-buy exemption, H1 dust, 6141, L1, Creator Vesting's launch bag and straight line plus its ImmutableOwner guard, the
 Sandwich Guard send taint, close paths (6142, then refunds), M1 pre-funded PDAs, King of the Hill (6128 + globals + wallet
-vars), staged scripts, and a script reading the DBC fee. BACKEND's e2e
+vars), staged scripts, a script reading the DBC fee, and the compiled king-of-the-hill.hs and hot-potato.hs examples. BACKEND's e2e
 (`server/tests/e2e-fork.test.ts`) runs the engine against the real DBC binary (launch, refusals, graduation, close).
 
 ## Changes BACKEND should know
@@ -64,8 +72,8 @@ vars), staged scripts, and a script reading the DBC fee. BACKEND's e2e
 - Sell Cooldown can be split across wallets (sybil), by design.
 - Creator Vesting holds every creator-owned token account to the launch-bag line (normally there is only the ATA).
 - A staged script that is never sealed keeps its rent (no close path for it yet).
-- For HOOKSCRIPT: on SBF the VM costs about 1,200 CU fixed plus ~1.4 × the script's `gas_max` (the `heavy` fixture,
-  gas_max 7,840, costs ~11,100 CU of VM time).
+- With the calibrated VM, real CU stays under the script's `gas_max` (heavy: gas 7,725, ~5,000 CU of VM time on top of the
+  empty-script cost).
 
 ## CU (LiteSVM, engine's own Execute CU from the program log)
 Each block alone, on a passing transfer with history (5 receipt lots, a prior sell, a linear sniper-fee schedule).
@@ -86,10 +94,10 @@ Each block alone, on a passing transfer with history (5 receipt lots, a prior se
 | trading-hours | 2,671 | 2,661 | 2,643 | 0 |
 | lock-in (pool read) | 2,985 | 3,086 | 2,967 | 425 |
 | creator-vest (slot state) | 2,696 | 2,686 | 2,678 | 35 |
-| custom: empty script (pool + wallets + VM fixed cost) | 5,494 | 5,528 | 6,480 | 3,837 |
-| custom: fee gate (reads price, progress, DBC fee) | 8,111 | 7,821 | 8,773 | 6,130 |
-| custom: King of the Hill (gas_max 820) | 6,903 | 6,424 | 7,139 | 4,496 |
-| custom: heavy (gas_max 7,840, 30 window sums) | 15,984 | 16,156 | 17,567 | 14,924 |
+| custom: empty script (pool + wallets + VM fixed cost) | 5,504 | 5,539 | 6,490 | 3,847 |
+| custom: fee gate (reads price, progress, DBC fee) | 8,137 | 7,840 | 8,791 | 6,148 |
+| custom: hand-assembled KotH | 6,593 | 6,439 | 7,165 | 4,522 |
+| custom: heavy (gas_max 7,725, 15 window sums) | 9,952 | 10,086 | 11,440 | 8,797 |
 
 Wallet-record blocks share their cost: the records are loaded and written once per transfer, however many blocks use them.
 A script with the CURVE flag adds ~2,300 CU (u128 price, progress and fee maths).
@@ -98,11 +106,25 @@ A script with the CURVE flag adds ~2,300 CU (u128 price, progress and fee maths)
 |---|---:|---:|---:|
 | hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + rising-max | 6,763 | 6,771 | 6,688 |
 | hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + anti-bundle + snipe-shield | 6,528 | 6,675 | 6,402 |
-| hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + custom (KotH) | 8,970 | 8,759 | 8,206 |
-| hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + custom (heavy) | 18,502 | 18,942 | 19,085 |
-| hold-timer + circuit-breaker + anti-bundle + rising-max + creator-vest + custom (heavy) | 18,850 | 18,781 | **19,399** |
+| hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + custom (KotH) | 8,660 | 8,774 | 8,232 |
+| hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + custom (heavy) | 12,294 | 12,696 | 12,782 |
+| hold-timer + circuit-breaker + anti-bundle + rising-max + creator-vest + custom (heavy) | 12,642 | 12,535 | 13,096 |
 
-A heavy script that also reads the curve would land near 21,700. The whole `transfer_checked` (Token-2022 plus its
+Compiled example scripts on their heaviest paths (`fork/cu.mjs`; refusals cost more because the reason is formatted and logged):
+
+| Script, path | alone | + the 5 heavy blocks | verdict |
+|---|---:|---:|---|
+| hot-potato: buy catches the potato | 7,438 | 9,493 | ok |
+| hot-potato: send passes the potato | 9,217 | 10,262 | ok |
+| hot-potato: buy burns the holder and catches | 8,633 | 10,718 | ok |
+| hot-potato: burnt wallet's buy (reason with a duration) | 10,199 | 12,149 | 6128 |
+| hot-potato: holder's sell (reason with a duration) | 11,275 | **13,424** | 6128 |
+| king-of-the-hill: buy takes the crown | 8,271 | 10,326 | ok |
+| king-of-the-hill: buy outbids the faded bar | 8,399 | 10,439 | ok |
+| king-of-the-hill: king's send (reason with a duration) | 10,895 | 11,813 | 6128 |
+| king-of-the-hill: sell by a non-king | 6,339 | 8,616 | ok |
+
+A script at the 8,000 gas cap that also reads the curve stays well under the budget (~15k CU). The whole `transfer_checked` (Token-2022 plus its
 extra-account resolution plus the engine) is 30k–55k CU in these runs, so swaps should set a compute-unit limit.
 
 ## Build and test
@@ -110,11 +132,11 @@ extra-account resolution plus the engine) is 30k–55k CU in these runs, so swap
 export PATH=$HOME/.cache/solana/v1.57/platform-tools/rust/bin:$HOME/.cache/solana/v1.57/platform-tools/llvm/bin:$PATH CARGO_HOME=$HOME/.cache/solana/cargo-home
 cargo build --release --target sbpf-solana-solana          # → target/sbpf-solana-solana/release/hookrz_engine.so (with the VM)
 cargo build --release --target sbpf-solana-solana --no-default-features   # without the VM (refuses scripted stacks)
-cargo test --release                                       # host unit tests (11) + parity vectors (9,625)
+cargo test --release                                       # host unit tests (11) + fixture verify + parity vectors (9,625)
 node vectors/gen.mjs                                       # regenerate vectors from web/src/engine (then cargo test)
-cargo run --release --example hs_fixtures                  # hand-assembled Hookscript fixtures → fork/fixtures/*.hex
-cd fork && npm install && npm test                         # LiteSVM fork tests (16)
-cd fork && npm run test:any-address                        # the same 16 with the .so loaded at another address
+cargo run --release --example hs_fixtures                  # re-assemble empty/koth/feegate (heavy, koth-example, hot-potato come from hookscript/)
+cd fork && npm install && npm test                         # LiteSVM fork tests (17)
+cd fork && npm run test:any-address                        # the same 17 with the .so loaded at another address
 cd fork && node cu.mjs                                     # CU table → fork/cu.json
 ```
 
@@ -122,4 +144,5 @@ cd fork && node cu.mjs                                     # CU table → fork/c
 - Parity: 9,625 / 9,625 vectors pass (12 block files incl. 2,668 Creator Vesting cases, 1,501 random multi-block stacks,
   the 8 engine.test.mjs cases). The generator dropped 2 circuit-breaker vectors where the float reference can't resolve 1 raw
   unit at the band edge.
-- Host unit tests: 11 pass. Fork tests: 16 pass at the default id and 16 pass at a random address. `web` npm test: 8 pass.
+- Host unit tests: 11 pass, plus the fixture verify test. Fork tests: 17 pass at the default id and 17 at a random
+  address. `web` npm test: 8 pass. BACKEND `server` npm test: 16 pass.

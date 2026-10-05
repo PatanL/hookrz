@@ -310,7 +310,7 @@ pub(crate) fn ctx_field(ctx: &Ctx, f: u8) -> Result<i64, VmError> {
         op::C_PROGRESS => ctx.progress_ppm as i64,
         op::C_MCAP => math::muldiv(tok(ctx.supply, d), u2i(ctx.price_e6), 1_000_000_000_000_000),
         op::C_RAISED => u2i(ctx.quote_reserve / 1_000),
-        op::C_FEE => (ctx.fee_bps as i64) * 100,
+        op::C_FEE => (ctx.fee_bps as i64).wrapping_mul(100),
         op::C_SAME_WALLET => ctx.same_wallet as i64,
         op::C_IS_CREATOR => (*ctx_key(ctx, op::KC_TRADER) == ctx.creator) as i64,
         _ => return Err(VmError::BadOperand),
@@ -375,7 +375,7 @@ fn window_sum(ctx: &Ctx, s: u8, dir: u8, window: i64) -> Result<i64, VmError> {
         1 => (w.n_out, &w.lots_out),
         _ => return Err(VmError::BadOperand),
     };
-    let secs = if window < 0 { 0 } else { window / ONE };
+    let secs = if window < 0 { 0 } else { math::sdiv(window, ONE) };
     let cutoff = ctx.now.saturating_sub(secs);
     let mut sum: i64 = 0;
     for (i, l) in lots.iter().enumerate() {
@@ -455,14 +455,14 @@ fn store(area: &mut [u8], present: bool, ty: u8, off: u8, v: i64, launch_ts: i64
     match ty {
         op::T_NUM => buf = v.to_le_bytes(),
         op::T_INT => {
-            let w = (v / ONE).clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+            let w = math::sdiv(v, ONE).clamp(i32::MIN as i64, i32::MAX as i64) as i32;
             buf[..4].copy_from_slice(&w.to_le_bytes());
         }
         op::T_TIME => {
             let r: i64 = if v == 0 {
                 0
             } else {
-                (v / ONE).saturating_sub(launch_ts).saturating_add(1).clamp(1, u32::MAX as i64)
+                math::sdiv(v, ONE).saturating_sub(launch_ts).saturating_add(1).clamp(1, u32::MAX as i64)
             };
             buf[..4].copy_from_slice(&(r as u32).to_le_bytes());
         }
@@ -523,7 +523,7 @@ fn key_of<'a>(h: &Header<'a>, ctx: &'a Ctx, mem: &'a Mem, kind: u8, arg: u8) -> 
             if arg >= h.n_keys {
                 return Err(VmError::BadKey);
             }
-            let o = 32 * arg as usize;
+            let o = (arg as usize) << 5;
             h.keys.get(o..o + 32).ok_or(VmError::BadKey)
         }
         op::K_GLOBAL => {
@@ -576,14 +576,14 @@ impl Stack {
 }
 
 fn ring_read(g: &[u8], off: usize, i: usize) -> Result<i64, VmError> {
-    let o = off + 8 * i;
+    let o = off + (i << 3);
     let b = g.get(o..o + 8).ok_or(VmError::BadSlot)?;
     let mut buf = [0u8; 8];
     buf.copy_from_slice(b);
     Ok(i64::from_le_bytes(buf))
 }
 fn ring_write(g: &mut [u8], off: usize, i: usize, v: i64) -> Result<(), VmError> {
-    let o = off + 8 * i;
+    let o = off + (i << 3);
     let b = g.get_mut(o..o + 8).ok_or(VmError::BadSlot)?;
     b.copy_from_slice(&v.to_le_bytes());
     Ok(())
@@ -594,23 +594,23 @@ fn ring_tick(g: &mut [u8], off: usize, w: u32, now: i64, price: i64) -> Result<(
     if w == 0 || off + op::RING_BYTES > g.len() {
         return Err(VmError::BadSlot);
     }
-    let b = math::clamp_t(now) / (w as i64);
+    let b = (math::clamp_t(now) as u64 / w as u64) as i64;
     let stored = ring_read(g, off, 0)?;
     let cur = b + 1;
-    if stored == 0 || cur < stored || cur - stored >= 5 {
+    if stored == 0 || cur < stored || cur.saturating_sub(stored) >= 5 {
         for i in 0..5 {
             ring_write(g, off, 1 + i, 0)?;
         }
     } else if cur > stored {
         let mut k = stored; // clear buckets stored .. b (as indices stored-1+1 .. b)
         while k < cur {
-            ring_write(g, off, 1 + (k % 5) as usize, 0)?;
+            ring_write(g, off, 1 + math::srem_e(k, 5) as usize, 0)?;
             k += 1;
         }
     } else {
         return Ok(());
     }
-    ring_write(g, off, 1 + (b % 5) as usize, price)?;
+    ring_write(g, off, 1 + math::srem_e(b, 5) as usize, price)?;
     ring_write(g, off, 0, cur)
 }
 
@@ -618,17 +618,17 @@ fn ring_at(g: &[u8], off: usize, w: u32, now: i64, price: i64) -> Result<i64, Vm
     if w == 0 || off + op::RING_BYTES > g.len() {
         return Err(VmError::BadSlot);
     }
-    let b = math::clamp_t(now) / (w as i64);
+    let b = (math::clamp_t(now) as u64 / w as u64) as i64;
     let stored = ring_read(g, off, 0)?;
     if stored == 0 {
         return Ok(price);
     }
-    let last = stored - 1;
+    let last = stored.saturating_sub(1);
     let mut j: i64 = 4;
     while j >= 0 {
         let bucket = b - j;
-        if bucket >= 0 && bucket <= last && bucket > last - 5 {
-            let v = ring_read(g, off, 1 + (bucket % 5) as usize)?;
+        if bucket >= 0 && bucket <= last && bucket > last.saturating_sub(5) {
+            let v = ring_read(g, off, 1 + math::srem_e(bucket, 5) as usize)?;
             if v != 0 {
                 return Ok(v);
             }
@@ -691,6 +691,7 @@ pub fn run_traced<T: Tracer>(
 ) -> Result<Verdict, VmError> {
     *gas_used = 0;
     let h = parse(code)?;
+    *gas_used = op::run_base(h.n_reasons);
     let mut mem = Mem {
         g: [0u8; GLOBALS_LEN],
         glen: globals.len().min(GLOBALS_LEN),
@@ -732,6 +733,16 @@ pub fn run_traced<T: Tracer>(
     Ok(verdict)
 }
 
+#[inline]
+fn charge(gas: &mut u32, w: u16) -> Result<(), VmError> {
+    *gas = gas.saturating_add(w as u32);
+    if *gas > GAS_LIMIT {
+        Err(VmError::OutOfGas)
+    } else {
+        Ok(())
+    }
+}
+
 fn exec<T: Tracer>(h: &Header<'_>, ctx: &Ctx, mem: &mut Mem, gas: &mut u32, tracer: &mut T) -> Result<Verdict, VmError> {
     let c = h.code;
     let mut st = Stack { v: [0i64; STACK_MAX], n: 0 };
@@ -744,10 +755,7 @@ fn exec<T: Tracer>(h: &Header<'_>, ctx: &Ctx, mem: &mut Mem, gas: &mut u32, trac
         };
         tracer.op(pc, o);
         let w = op::gas(o).ok_or(VmError::BadOpcode)?;
-        *gas = gas.saturating_add(w as u32);
-        if *gas > GAS_LIMIT {
-            return Err(VmError::OutOfGas);
-        }
+        charge(gas, w)?;
         pc += 1;
         match o {
             op::END => return Ok(Verdict::Allow),
@@ -782,13 +790,11 @@ fn exec<T: Tracer>(h: &Header<'_>, ctx: &Ctx, mem: &mut Mem, gas: &mut u32, trac
                 st.push(a)?;
                 st.push(a)?;
             }
-            op::PUSHI => {
+            op::PUSHI | op::PUSHR => {
+                let at = pc;
                 let v = rdvar(c, &mut pc)?;
-                st.push(n(v))?;
-            }
-            op::PUSHR => {
-                let v = rdvar(c, &mut pc)?;
-                st.push(v)?;
+                charge(gas, op::extra_push(pc - at))?;
+                st.push(if o == op::PUSHI { n(v) } else { v })?;
             }
             op::LDL => {
                 let i = rd8(c, &mut pc)? as usize;
@@ -836,6 +842,7 @@ fn exec<T: Tracer>(h: &Header<'_>, ctx: &Ctx, mem: &mut Mem, gas: &mut u32, trac
             }
             op::CTX => {
                 let f = rd8(c, &mut pc)?;
+                charge(gas, op::extra_ctx(f))?;
                 st.push(ctx_field(ctx, f)?)?;
             }
             op::WAL => {
@@ -855,6 +862,7 @@ fn exec<T: Tracer>(h: &Header<'_>, ctx: &Ctx, mem: &mut Mem, gas: &mut u32, trac
                 let f = rd8(c, &mut pc)?;
                 let tz = rd16(c, &mut pc)? as i16;
                 let rule = rd8(c, &mut pc)?;
+                charge(gas, op::extra_clock(f, rule))?;
                 if rule > 3 {
                     return Err(VmError::BadOperand);
                 }

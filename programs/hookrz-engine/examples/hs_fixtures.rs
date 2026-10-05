@@ -1,5 +1,7 @@
-//! Hand-assembled Hookscript fixtures for the engine's fork tests and CU bench (until the HOOKSCRIPT
-//! compiler is ready). Headers are filled from `hookscript_vm::analyze`, so `verify` accepts them.
+//! Hand-assembled Hookscript fixtures for the engine's fork tests and CU bench. Headers are filled from
+//! `hookscript_vm::analyze`, so `verify` accepts them; the output matches hookscript/vm/fixtures byte for byte.
+//! `heavy.hex` (15 window reads, gas 7,725), `koth-example.hex` and `hot-potato.hex` come from HOOKSCRIPT
+//! (hookscript/vm/fixtures and `node compiler/bin/hsc.ts --hex examples/hot-potato.hs`).
 //! Run: cargo run --release --example hs_fixtures   → fork/fixtures/*.hex
 use hookscript_vm::{analyze, op, verify, VERSION};
 use std::{collections::HashMap, fs, path::Path};
@@ -103,16 +105,6 @@ fn koth() -> Vec<u8> {
     a.finish(&[], &[(0, "The king can't sell while wearing the crown")])
 }
 
-/// Worst case for CU: ~7,800 gas of window sums over both wallets' lots, then allow.
-fn heavy() -> Vec<u8> {
-    let mut a = Asm::new();
-    for i in 0..30 {
-        a.pushi(3600).b(&[op::WIN, (i % 2) as u8, (i / 2 % 2) as u8, op::POP]);
-    }
-    a.b(&[op::END]);
-    a.finish(&[], &[])
-}
-
 /// Reads the DBC fee: no buys while the curve's fee is above 10% (C_FEE is a fraction, 0.1 = 100_000).
 fn feegate() -> Vec<u8> {
     let mut a = Asm::new();
@@ -134,7 +126,7 @@ fn empty() -> Vec<u8> {
 fn main() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("fork/fixtures");
     fs::create_dir_all(&dir).unwrap();
-    for (name, s) in [("koth", koth()), ("heavy", heavy()), ("empty", empty()), ("feegate", feegate())] {
+    for (name, s) in [("koth", koth()), ("empty", empty()), ("feegate", feegate())] {
         let info = verify(&s).unwrap();
         fs::write(dir.join(format!("{name}.hex")), s.iter().map(|b| format!("{b:02x}")).collect::<String>() + "\n").unwrap();
         println!("{name}: {} bytes, gas_max {}, flags {:#04x}", s.len(), info.gas_max, info.flags);

@@ -29,7 +29,7 @@ const CASE = Keypair.generate().publicKey;
 const SYS = new PublicKey('11111111111111111111111111111111');
 let nonce = 0;
 
-interface Out { total: number; verdict: number; gas: number; ops: [number, number][] }
+interface Out { total: number; verdict: number; gas: number; ops: [number, number, number][] }
 function bench(mode: 0 | 1, script: Uint8Array, c: Ctx, g: Uint8Array, s: Uint8Array, d: Uint8Array): Out {
   const pad = (b: Uint8Array, n: number) => { const o = new Uint8Array(n); o.set(b.subarray(0, n)); return o; };
   const data = new Uint8Array(3 + script.length + 578 + 256 + 64);
@@ -46,8 +46,8 @@ function bench(mode: 0 | 1, script: Uint8Array, c: Ctx, g: Uint8Array, s: Uint8A
   const rd = r.returnData().data() as Uint8Array;
   const dv = new DataView(rd.buffer, rd.byteOffset, rd.byteLength);
   const n = dv.getUint16(9, true);
-  const ops: [number, number][] = [];
-  for (let i = 0; i < n; i++) ops.push([rd[11 + 3 * i], dv.getUint16(12 + 3 * i, true)]);
+  const ops: [number, number, number][] = [];
+  for (let i = 0; i < n; i++) ops.push([rd[11 + 5 * i], dv.getUint16(12 + 5 * i, true), dv.getUint16(14 + 5 * i, true)]);
   return { total: dv.getUint32(0, true), verdict: rd[4], gas: dv.getUint32(5, true), ops };
 }
 
@@ -79,6 +79,7 @@ const SYN: { name: string; code: number[]; keys?: Uint8Array[] }[] = [
   { name: 'ring', code: [OP.RINGTICK, 0, 7, 0, 0, 0, OP.RINGAT, 0, 7, 0, 0, 0, OP.POP, OP.RINGTICK, 48, 0xff, 0xff, 0, 0, OP.RINGAT, 48, 0xff, 0xff, 0, 0, OP.POP, OP.RINGTICK, 96, 1, 0, 0, 0, OP.RINGAT, 96, 3, 0, 0, 0, OP.POP] },
   { name: 'storage', code: [...rep(4, (t) => [...P(BIG), OP.STG, t, 100 + 8 * t, OP.LDG, t, 100 + 8 * t, OP.POP]), ...rep(4, (t) => [...P(BIG), OP.STW, t % 2, t, 8 * t, OP.LDW, (t + 1) % 4, t, 8 * t, OP.POP])] },
   { name: 'keys', keys: [new Uint8Array(32).fill(7)], code: [...rep(6, () => [OP.KEQ, 0, 1, 0, 2, OP.POP, OP.KEQ, 2, 0, 1, 0, OP.POP, OP.KEQ, 3, 2, 0, 3, OP.POP]), OP.KSTG, 0, 1, 0, OP.KSTG, 32, 0, 3, OP.KSTW, 0, 0, 0, 2, OP.KSTW, 1, 0, 1, 0] },
+  { name: 'keys equal', keys: [new Uint8Array(32).fill(2)], code: rep(8, () => [OP.KEQ, 0, 4, 0, 4, OP.POP, OP.KEQ, 1, 0, 0, 4, OP.POP, OP.KEQ, 2, 64, 0, 0, OP.POP]) },
   { name: 'locals/jumps', code: rep(10, () => [...P(1n), OP.STL, 3, OP.LDL, 3, OP.JZ, 0, 0, OP.LDL, 3, OP.JNZ, 0, 0, OP.JMP, 0, 0]) },
   { name: 'refusev', code: [...P(BIG), OP.REFUSEV, 0] },
   { name: 'refuse', code: [OP.REFUSE, 0] },
@@ -95,18 +96,38 @@ function stressCtx(seed: number): Ctx {
 
 // ───── run ─────
 const maxCu = new Map<number, number>();
-const note = (op: number, cu: number) => maxCu.set(op, Math.max(maxCu.get(op) ?? 0, cu));
+const maxAt = new Map<number, string>();
+let curCase = '';
+const note = (op: number, cu: number) => { if (cu > (maxCu.get(op) ?? -1)) { maxCu.set(op, cu); maxAt.set(op, curCase); } };
+// per-variant maxima: the operand bytes that change the cost
+const variants = new Map<string, number>();
+function variantKey(script: Uint8Array, pc: number, op: number): string | null {
+  const codeStart = script.length - (script[6] | (script[7] << 8));
+  const at = codeStart + pc;
+  if (op === OP.PUSHI || op === OP.PUSHR) { let j = at + 1; while (j < script.length && (script[j] & 0x80)) j++; return `${OP_NAME[op]}:len${j - at}`; }
+  if (op === OP.CTX) return `CTX:f${script[at + 1]}`;
+  if (op === OP.WAL) return `WAL:f${script[at + 2]}`;
+  if (op === OP.CLOCK) return `CLOCK:r${script[at + 4]}:f${script[at + 1]}`;
+  if (op === OP.MOON) return `MOON:f${script[at + 1]}`;
+  if (op === OP.LDG || op === OP.STG) return `${OP_NAME[op]}:t${script[at + 1]}`;
+  if (op === OP.LDW || op === OP.STW) return `${OP_NAME[op]}:t${script[at + 2]}`;
+  return null;
+}
+const noteV = (script: Uint8Array, pc: number, op: number, cu: number) => { const k = variantKey(script, pc, op); if (k) variants.set(k, Math.max(variants.get(k) ?? 0, cu)); };
 const totals: { name: string; total: number; gas: number; staticGas: number }[] = [];
 const keyFill = new Uint8Array(32).fill(7);
 
+const MAXPARSE = assemble([OP.END], Array.from({ length: 16 }, (_, i) => [1, `reason ${i} `.padEnd(50, 'x')] as [number, string]), [1, 2, 3, 4].map((k) => new Uint8Array(32).fill(k)));
+SYN.push({ name: 'parse max', code: [OP.END] });
 for (const s of SYN) {
-  const script = assemble(s.code, [[1, 'r {}']], s.keys ?? []);
+  const script = s.name === 'parse max' ? MAXPARSE : assemble(s.code, [[1, 'r {}']], s.keys ?? []);
   for (let i = 0; i < 6; i++) {
+    curCase = `syn:${s.name}#${i}`;
     const c = stressCtx(i + 1);
     const g = new Uint8Array(256); g.set(keyFill, 0); g.set(keyFill, 32);
     const sv = new Uint8Array(32).fill(i), dv = new Uint8Array(32).fill(i);
     const t = bench(1, script, c, g, sv, dv);
-    for (const [op, cu] of t.ops) note(op, cu);
+    for (const [op, pc, cu] of t.ops) { note(op, cu); if (op !== 0xfe) noteV(script, pc, op, cu); }
     const p = bench(0, script, c, g, sv, dv);
     totals.push({ name: `syn:${s.name}`, total: p.total, gas: p.gas, staticGas: analyze(script, { noLimit: true }).gasMax });
   }
@@ -128,22 +149,29 @@ for (const f of readdirSync(exDir).filter((x) => x.endsWith('.hs')).sort()) {
       : attempt(w, c.bytes, { kind: ev.kind, from: ev.w, to: ev.to, tokens: BigInt(Math.floor(Number(me.balance) * (ev.frac ?? 1))) }, w.launchTs + BigInt(ev.t));
     if (!o) continue;
     n++;
+    curCase = `${f}#${n}`;
     const t = bench(1, c.bytes, o.ctx, o.globals, o.src, o.dst);
-    for (const [op, cu] of t.ops) note(op, cu);
+    for (const [op, pc, cu] of t.ops) { note(op, cu); if (op !== 0xfe) noteV(c.bytes, pc, op, cu); }
     const p = bench(0, c.bytes, o.ctx, o.globals, o.src, o.dst);
     if (p.gas !== o.result.gas) throw new Error(`gas mismatch on ${f}: sBPF ${p.gas} vs TS ${o.result.gas}`);
     totals.push({ name: f, total: p.total, gas: p.gas, staticGas: c.cu });
   }
 }
 
-const rows = [...maxCu.entries()].sort((a, b) => a[0] - b[0]).map(([op, cu]) => ({ op: op === 0xfe ? 'PARSE' : OP_NAME[op] ?? op, measured: cu, weight: op === 0xfe ? null : gasOf(op) ?? null }));
+const rows = [...maxCu.entries()].sort((a, b) => a[0] - b[0]).map(([op, cu]) => ({ op: op === 0xfe ? 'PARSE' : OP_NAME[op] ?? op, measured: cu, weight: op === 0xfe ? null : gasOf(op) ?? null, at: maxAt.get(op) }));
 console.log('op           measured  weight');
-for (const r of rows) console.log(`${String(r.op).padEnd(12)} ${String(r.measured).padStart(8)}  ${String(r.weight ?? '-').padStart(6)}${r.weight !== null && r.measured > r.weight ? '   <-- UNDER' : ''}`);
-const worst = totals.map((t) => ({ ...t, over: t.total - t.gas })).sort((a, b) => b.over - a.over).slice(0, 8);
+for (const r of rows) console.log(`${String(r.op).padEnd(12)} ${String(r.measured).padStart(8)}  ${String(r.weight ?? '-').padStart(6)}${r.weight !== null && r.measured > r.weight ? '   <-- UNDER' : '        '}  ${r.at}`);
+console.log('\nvariants:');
+console.log([...variants.entries()].sort().map(([k, v]) => `${k}=${v}`).join('  '));
+const worst = totals.map((t) => ({ ...t, over: t.total - t.gas })).sort((a, b) => b.over - a.over).slice(0, 6);
 console.log('\nwhole runs (real CU vs gas charged; real includes the header parse):');
 for (const t of worst) console.log(`  ${t.name.padEnd(28)} real ${t.total}  gas ${t.gas}  static ${t.staticGas}  real-gas ${t.over}`);
 const ratio = Math.max(...totals.map((t) => t.total / Math.max(1, t.gas)));
-console.log(`\nruns: ${totals.length}, max real/gas ratio ${ratio.toFixed(2)}`);
+const over = totals.filter((t) => t.total > t.gas);
+const staticOver = totals.filter((t) => t.total > t.staticGas);
+console.log(`\nruns: ${totals.length}, max real/gas ratio ${ratio.toFixed(3)}, runs where real CU > gas charged: ${over.length}, real CU > static worst case: ${staticOver.length}`);
+const margin = Math.min(...totals.map((t) => t.gas - t.total));
+console.log(`smallest margin (gas charged - real CU): ${margin}`);
 const jsonAt = process.argv.indexOf('--json');
-if (jsonAt > 0) writeFileSync(process.argv[jsonAt + 1], JSON.stringify({ ops: rows, runs: totals }, null, 2));
+if (jsonAt > 0) writeFileSync(process.argv[jsonAt + 1], JSON.stringify({ ops: rows, variants: Object.fromEntries(variants), runs: totals }, null, 2));
 void mkCtx;

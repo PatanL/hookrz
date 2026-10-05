@@ -11,6 +11,7 @@ import { toast } from './chrome.js';
 import { CHECKS, STATE_LABEL, STATE_LONG, paramValue, flagsHtml, famLabel, plainLine } from './blocks-card.js';
 import { pxTile, ruleName } from './coin-shared.js';
 import { ideaById, ideaTile } from './blocks-ideas.js';
+import { mountRulePlay, hasPlay } from './rule-play.js';
 import { editorHTML as hsEditorHTML, stateFromDraft, ideaState, refresh as refreshHs, wire as wireHs, needsCheck, testerHTML, mountTester, EXAMPLES } from './hs-editor.js';
 
 // ───────── formatting ─────────
@@ -409,6 +410,7 @@ export function openDetail(id, { opener, idea = null } = {}) {
     </header>
     <div class="bd-body">
       ${ix || b.id === 'custom' ? '' : `<section class="bd-sec bd-first"><h3 class="bd-h">What it does</h3><p class="bd-refuses">${esc(b.refuses)}</p></section>`}
+      ${ix && hasPlay(ix.id) ? `<section class="bd-sec bd-first bd-play"><h3 class="bd-h">Watch it play</h3><div data-o="play"></div></section>` : ''}
       ${!ix && (b.risk || b.power || b.unreviewed) ? `<div class="bk-flags">${flagsHtml(b, { long: true })}</div>` : ''}
       ${params.length ? `<section class="bd-sec"><div class="row between"><h3 class="bd-h">Settings</h3><button class="btn btn-ghost btn-sm" data-act="reset">Reset</button></div>
         <div class="bd-params">${params.map((p) => paramHtml(p, P[p.key])).join('')}</div></section>` : ''}
@@ -497,6 +499,8 @@ export function openDetail(id, { opener, idea = null } = {}) {
   }
   if (exp) exp.panel.mount(el.querySelector('[data-o="exp"]'), () => P);
   refreshParams();
+  // a rule idea plays a short scene through its real script first (the footer already has "Launch with this")
+  const play = ix && hasPlay(ix.id) ? mountRulePlay(el.querySelector('[data-o="play"]'), { ids: [ix.id], launch: false, head: false }) : null;
 
   // ── chrome: close, copy, focus, url
   const url = new URL(location.href);
@@ -521,6 +525,7 @@ export function openDetail(id, { opener, idea = null } = {}) {
   el.focus({ preventScroll: true });
 
   function close(replaced = false) {
+    play?.destroy();
     document.removeEventListener('keydown', keydown);
     back.classList.remove('in');
     back.classList.add('out');

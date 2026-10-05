@@ -1,5 +1,6 @@
 // hookrz.fun — home. Benefit first: say your rule in plain English (drafted and checked live), rule ideas you can
-// launch as they are, the five rulebooks, coins, and the brand line. The engine, the transfer path and the fee details
+// watch play out against the real rule (src/ui/rule-play.js) and launch as they are, the five rulebooks, coins, and
+// the brand line. The engine, the transfer path and the fee details
 // live in Docs. All data comes through src/api/client.js.
 import '../styles/base.css';
 import '../styles/home.css';
@@ -14,6 +15,7 @@ import { api } from '../api/client.js';
 import { EXAMPLES } from '../hookscript/examples.js';
 import { IDEAS, glyph } from '../ui/home-ideas.js';
 import { mountRuleCard, cardHTML } from '../ui/home-rule.js';
+import { mountRulePlay, hasPlay } from '../ui/rule-play.js';
 
 mountChrome('');
 
@@ -35,6 +37,10 @@ const OUTCOME = {
   market: 'Trades like a stock: market hours and a crash breaker.',
 };
 const famsOf = (p) => [...new Set(p.slots.flat().map((id) => byId[id]?.family).filter(Boolean))];
+
+// "Watch it play": the ideas with a tab on home (each plays a short scene through its real script)
+const FEATURED = ['king-of-the-hill', 'tag', 'hot-potato', 'jackpot', 'fomo'];
+const PLAY = '<svg width="10" height="10" viewBox="0 0 12 12" aria-hidden="true" shape-rendering="crispEdges"><path d="M2 1h2v1h2v1h2v1h2v4H8v1H6v1H4v1H2z" fill="currentColor"/></svg>';
 
 const STEPS = [
   [glyph('custom', { size: 28 }), 'Pick your rules', 'Choose a rulebook, or describe your own rule in plain English.'],
@@ -106,19 +112,26 @@ app.innerHTML = `
       <div class="section-head sf">
         <span class="eyebrow">Rule ideas</span>
         <h2>Coins that play by <span class="chrome-text">their own rules.</span></h2>
-        <p class="lede">Each idea is a real rule, tested so every holder can still sell. Launch it as it is, or tweak it first.</p>
+        <p class="lede">Watch one play out. Every trade runs through the real rule, so each “Blocked” is what the chain would say. Every idea is tested so holders can always sell.</p>
       </div>
       <a class="ask-alt own-link sf" href="#ask" id="ownLink">${glyph('custom', { size: 16 })}Or write your own rule</a>
     </div>
-    <div class="idea-grid">
-      ${IDEAS.map((d) => `<a class="idea tile sf" href="build.html?idea=${encodeURIComponent(d.id)}">
-        <span class="idea-ic">${glyph(d.icon, { size: 36 })}</span>
-        <h3>${esc(d.name)}</h3>
-        <p>${esc(d.line)}</p>
-        <span class="idea-go pixel">Launch with this ${ARROW}</span>
-      </a>`).join('')}
+    <div class="ideas-play">
+      <div class="ideas-stage" id="rulePlay"></div>
+      <div class="ideas-list">
+        <span class="il-k pixel">Launch one as it is</span>
+        <div class="idea-grid" id="ideaGrid">
+          ${IDEAS.map((d) => `<div class="idea tile">
+            <a class="idea-go" href="build.html?idea=${encodeURIComponent(d.id)}">
+              <span class="idea-ic">${glyph(d.icon, { size: 22 })}</span>
+              <span class="idea-tx"><b>${esc(d.name)}</b><span>${esc(d.short)}</span></span>
+            </a>
+            ${hasPlay(d.id) ? `<button type="button" class="idea-watch" data-watch="${esc(d.id)}" aria-label="Watch ${esc(d.name)} play" title="Watch it play">${PLAY}</button>` : ''}
+          </div>`).join('')}
+        </div>
+        <button type="button" class="btn btn-glass idea-more" id="ideaMore">See all ${IDEAS.length} rule ideas</button>
+      </div>
     </div>
-    <button type="button" class="btn btn-glass idea-more" id="ideaMore">See ${IDEAS.length - 6} more rule ideas</button>
   </div>
 </section>
 
@@ -208,6 +221,21 @@ document.getElementById('ownLink').onclick = (e) => {
   setTimeout(() => input.focus({ preventScroll: true }), reduce ? 0 : 450);
 };
 document.getElementById('ideaMore').onclick = (e) => { e.currentTarget.previousElementSibling.classList.add('all'); };
+
+// ───────── rule ideas: watch one play out against its real script ─────────
+const stage = document.getElementById('rulePlay');
+const rows = Object.fromEntries([...document.querySelectorAll('#ideaGrid [data-watch]')].map((b) => [b.dataset.watch, b.closest('.idea')]));
+const player = mountRulePlay(stage, {
+  ids: FEATURED, label: 'Watch it play',
+  onShow: (id) => { for (const [k, r] of Object.entries(rows)) { r.classList.toggle('on', k === id); r.querySelector('[data-watch]').setAttribute('aria-pressed', String(k === id)); } },
+});
+document.getElementById('ideaGrid').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-watch]');
+  if (!b || !player) return;
+  player.show(b.dataset.watch);
+  const r = stage.getBoundingClientRect();
+  if (r.top < 64 || r.top > innerHeight * 0.5) scrollTo({ top: scrollY + r.top - 84, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+});
 
 // ───────── coins ─────────
 loadCoins();

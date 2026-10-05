@@ -87,8 +87,8 @@
 .ask-chip.on { color: var(--ice); border-color: rgba(143, 202, 255, .5); background: var(--ice-wash); }
 .ask-alt { display: inline-flex; align-items: center; gap: 8px; margin-top: 22px; font-size: 14.5px; font-weight: 600; color: var(--text-2); }
 .ask-alt:hover { color: var(--ice); }
-.ask-alt svg, .idea-go svg, .book-go svg { width: 14px; height: 14px; transition: translate .15s; }
-.ask-alt:hover svg, .idea:hover .idea-go svg, .book:hover .book-go svg { translate: 3px 0; }
+.ask-alt svg, .book-go svg { width: 14px; height: 14px; transition: translate .15s; }
+.ask-alt:hover svg, .book:hover .book-go svg { translate: 3px 0; }
 
 /* the hook hanging over the live rule card */
 .hero-art { position: relative; padding-top: 128px; }
@@ -149,10 +149,22 @@
 .ideas-head .section-head { max-width: 760px; margin: 0; }
 .own-link { margin: 0 0 6px; flex: none; color: var(--ice); }
 .own-link:hover { color: var(--text); }
-.idea-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-.idea { display: flex; flex-direction: column; gap: 10px; padding: 20px 20px 16px; min-height: 196px; }
+/* the player (src/ui/rule-play.js) beside a compact list of every idea */
+.ideas-play { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: clamp(20px, 2.6vw, 36px); align-items: start; }
+.ideas-stage { min-width: 0; }
+.ideas-list { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.il-k { font-size: 10.5px; line-height: 16px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-3); }
+.idea-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.idea { display: flex; align-items: stretch; min-width: 0; }
+.home .idea.tile:hover { background: linear-gradient(180deg, rgba(143, 202, 255, .09), rgba(143, 202, 255, .02)); }
+.home .idea.tile:hover::before { background: var(--rc-hi); }
+.idea-go { flex: 1; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px; padding: 7px 4px 7px 8px; }
+.home .idea.tile.on { background: linear-gradient(90deg, rgba(143, 202, 255, .12), rgba(143, 202, 255, .03)); }
+.home .idea.tile.on::before { background: var(--rc-hi); }
+.idea.on .idea-watch { color: var(--ice); border-color: rgba(143, 202, 255, .55); }
+.idea-go:focus-visible { outline: 2px solid var(--ice); outline-offset: -3px; }
 .idea-ic {
-  width: 56px; height: 56px; display: grid; place-items: center; margin-bottom: 4px;
+  width: 34px; height: 34px; display: grid; place-items: center;
   background: linear-gradient(180deg, rgba(143, 202, 255, .10), rgba(143, 202, 255, .02));
   box-shadow: inset 0 0 0 1px rgba(143, 202, 255, .22), inset 0 1px 0 rgba(255, 255, 255, .12);
   clip-path: var(--notch);
@@ -160,10 +172,15 @@
 }
 .idea-ic svg { filter: drop-shadow(0 0 6px rgba(110, 178, 255, .35)); }
 .idea:hover .idea-ic { box-shadow: inset 0 0 0 1px rgba(143, 202, 255, .55), inset 0 1px 0 rgba(255, 255, 255, .2), 0 0 22px rgba(110, 178, 255, .25); }
-.idea h3 { font-size: 19px; }
-.idea p { flex: 1; font-size: 14px; line-height: 1.5; color: var(--text-2); }
-.idea-go { display: inline-flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-2); transition: color .2s; }
-.idea:hover .idea-go, .idea:focus-visible .idea-go { color: var(--ice); }
+.idea-ic svg { width: 20px; height: 20px; }
+.idea-tx { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.idea-tx b { font-size: 14.5px; font-weight: 750; line-height: 1.25; letter-spacing: -.005em; }
+.idea-tx span { font-size: 12.5px; line-height: 1.35; color: var(--text-2); }
+.idea-watch {
+  flex: none; align-self: center; width: 28px; height: 28px; margin-right: 8px; display: grid; place-items: center; cursor: pointer; position: relative; z-index: 4;
+  color: var(--text-3); background: transparent; border: 1px solid var(--line-2); clip-path: var(--notch); transition: color .15s, border-color .15s, background .15s;
+}
+.idea-watch:hover, .idea-watch:focus-visible { color: var(--ice); border-color: rgba(143, 202, 255, .55); background: var(--ice-wash); outline: none; }
 .idea-more { display: none; }
 
 /* ═════════════ RULEBOOKS ═════════════ */
@@ -246,6 +263,8 @@
 
 /* ═════════════ responsive ═════════════ */
 @media (max-width: 1180px) {
+  .ideas-play { grid-template-columns: minmax(0, 1fr); }
+  .ideas-stage { max-width: 780px; }
   .idea-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .book-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
@@ -286,15 +305,15 @@
   .step-n { width: 24px; }
   .step-n svg { height: 30px; }
   .step-ic { top: 14px; right: 14px; }
-  .idea-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-  .idea { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'ic h' 'ic p'; column-gap: 14px; row-gap: 3px; min-height: 0; padding: 14px; }
-  .idea-ic { grid-area: ic; width: 48px; height: 48px; margin: 0; align-self: start; }
-  .idea-ic svg { width: 28px; height: 28px; }
-  .idea h3 { grid-area: h; font-size: 16.5px; }
-  .idea p { grid-area: p; font-size: 13.5px; }
-  .idea-go { display: none; }
-  .idea-grid:not(.all) .idea:nth-child(n + 7) { display: none; }
-  .idea-more { display: flex; margin-top: 12px; width: 100%; }
+  .ideas-play { gap: 28px; }
+  .idea-grid { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .idea-go { padding: 9px 4px 9px 9px; gap: 11px; }
+  .idea-watch { width: 38px; height: 38px; }
+  .ideas-list { gap: 0; }
+  .idea-grid:not(.all) { display: none; }
+  .ideas-list:has(.idea-grid:not(.all)) .il-k { display: none; }
+  .idea-grid.all { margin-top: 10px; }
+  .idea-more { display: flex; width: 100%; }
   .idea-grid.all + .idea-more { display: none; }
   .book-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .book { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'h ics' 'p p' 'go go'; gap: 4px 12px; padding: 14px; }

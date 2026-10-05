@@ -15,6 +15,11 @@ export type TradeRow = {
   price_before: number | null; price_after: number | null; units: number | null; dest: string | null;
 };
 
+export type KeeperActionRow = {
+  mint: string; kind: string; rule?: string | null; lamports?: string | null; tokens?: string | null; dest?: string | null;
+  sig?: string | null; ok: boolean; detail?: any; at: number;
+};
+
 export class Store {
   db: DatabaseSync;
   constructor(path = ":memory:") {
@@ -36,6 +41,11 @@ export class Store {
       CREATE TABLE IF NOT EXISTS holders (mint TEXT NOT NULL, owner TEXT NOT NULL, account TEXT NOT NULL, raw TEXT NOT NULL, PRIMARY KEY (mint, account));
       CREATE TABLE IF NOT EXISTS pending (id TEXT PRIMARY KEY, kind TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS keeper_ledger (mint TEXT PRIMARY KEY, body TEXT NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS keeper_actions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, mint TEXT NOT NULL, kind TEXT NOT NULL, rule TEXT, lamports TEXT, tokens TEXT, dest TEXT,
+        sig TEXT, ok INTEGER NOT NULL, detail TEXT, at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS keeper_actions_mint ON keeper_actions(mint, id);
     `);
   }
   private coin(r: any): CoinRow | null {
@@ -100,6 +110,26 @@ export class Store {
   }
   holders(mint: string) {
     return this.db.prepare("SELECT owner, account, raw FROM holders WHERE mint = ? ORDER BY CAST(raw AS REAL) DESC").all(mint) as { owner: string; account: string; raw: string }[];
+  }
+  // ───── keeper ledger (one JSON body per coin) and its public action log ─────
+  keeperLedger(mint: string): any | null {
+    const r = this.db.prepare("SELECT body FROM keeper_ledger WHERE mint = ?").get(mint) as any;
+    return r ? JSON.parse(r.body) : null;
+  }
+  setKeeperLedger(mint: string, body: any) {
+    this.db.prepare("INSERT OR REPLACE INTO keeper_ledger (mint, body, updated_at) VALUES (?, ?, ?)").run(mint, JSON.stringify(body), Date.now());
+  }
+  addKeeperAction(a: KeeperActionRow) {
+    const r = this.db.prepare("INSERT INTO keeper_actions (mint, kind, rule, lamports, tokens, dest, sig, ok, detail, at) VALUES (?,?,?,?,?,?,?,?,?,?)").run(
+      a.mint, a.kind, a.rule ?? null, a.lamports ?? null, a.tokens ?? null, a.dest ?? null, a.sig ?? null, a.ok ? 1 : 0, a.detail ? JSON.stringify(a.detail) : null, a.at,
+    );
+    return Number(r.lastInsertRowid);
+  }
+  keeperActions(mint: string | null, limit = 100) {
+    const rows = (mint
+      ? this.db.prepare("SELECT * FROM keeper_actions WHERE mint = ? ORDER BY id DESC LIMIT ?").all(mint, limit)
+      : this.db.prepare("SELECT * FROM keeper_actions ORDER BY id DESC LIMIT ?").all(limit)) as any[];
+    return rows.map((r) => ({ ...r, ok: !!r.ok, detail: r.detail ? JSON.parse(r.detail) : null })) as (KeeperActionRow & { id: number })[];
   }
   kv(k: string, v?: string) {
     if (v === undefined) return (this.db.prepare("SELECT v FROM kv WHERE k = ?").get(k) as any)?.v ?? null;

@@ -5,6 +5,7 @@ import cors from "@fastify/cors";
 import { PublicKey } from "@solana/web3.js";
 import { BLOCKS } from "../../web/src/data/blocks.js";
 import { AppError } from "./market.js";
+import { listMarks, readMark, prepareMarks } from "./marks.js";
 import type { Hookrz } from "./service.js";
 import type { ForkChain } from "./fork.js";
 
@@ -56,6 +57,19 @@ export function buildApp(svc: Hookrz, o: { info?: any } = {}) {
   });
   app.get("/v1/coins/:mint/trades", async (req: any) => json(svc.trades(req.params.mint, Math.min(500, Number(req.query?.limit ?? 40)))));
   app.get("/v1/coins/:mint/holders", async (req: any) => json(svc.holders(req.params.mint)));
+  // Blocklist marks and Allowlist passes (hookrz_engine set_mark): read from chain; the creator edits them with signed txs.
+  const coinMint = (key: string) => {
+    const c = svc.store.findCoin(key);
+    if (!c) throw new AppError("NOT_FOUND", `No coin ${key}`, 404);
+    return new PublicKey(c.mint);
+  };
+  app.get("/v1/coins/:mint/marks", async (req: any) => json(await listMarks(svc.chain, svc.hook, coinMint(req.params.mint))));
+  app.get("/v1/coins/:mint/marks/:owner", async (req: any) => {
+    let owner: PublicKey;
+    try { owner = new PublicKey(String(req.params.owner)); } catch { throw new AppError("BAD_REQUEST", "Not an address"); }
+    return json(await readMark(svc.chain, svc.hook, coinMint(req.params.mint), owner));
+  });
+  app.post("/v1/coins/:mint/marks/prepare", async (req: any) => json(await prepareMarks(svc.chain, svc.hook, svc.store, req.params.mint, req.body ?? {})));
   app.post("/v1/quote", async (req: any) => json(await svc.quote(req.body ?? {})));
   app.post("/v1/trade/prepare", async (req: any) => json(await svc.prepareTrade(req.body ?? {})));
   app.post("/v1/stacks/validate", async (req: any) => json(svc.validate(req.body?.stack ?? [])));
@@ -67,7 +81,9 @@ export function buildApp(svc: Hookrz, o: { info?: any } = {}) {
   app.post("/v1/launch/submit", async (req: any) => json(await svc.submitLaunch(req.body ?? {})));
   app.get("/v1/creators/:wallet", async (req: any) => json(svc.creator(req.params.wallet)));
   app.post("/v1/fees/claim/prepare", async (_req, reply) => reply.status(501).send({ error: "NOT_YET", message: "Fee claims arrive with the keeper (phase 2)" }));
-  app.get("/v1/keeper", async () => json(svc.keeper.log.slice(0, 100)));
+  // the public keeper: loop state, every keeper coin's totals and the latest actions (each with its signature)
+  app.get("/v1/keeper", async () => json(svc.keeper.overview()));
+  app.get("/v1/coins/:mint/keeper", async (req: any) => json(svc.keeperLedger(req.params.mint)));
 
   // signed transaction relay: the fork has no public RPC, and on devnet this indexes refusals immediately
   app.post("/v1/tx/send", async (req: any) => {

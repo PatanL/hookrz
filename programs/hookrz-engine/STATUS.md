@@ -1,12 +1,41 @@
 # hookrz_engine status
 
-_Updated 2026-10-04 20:20._
+_Updated 2026-10-04 22:00. The deployed devnet program (5bewmr…, 145,704 B) is the previous build; this tree is the
+upgrade candidate (not deployed): `node server/scripts/deploy-engine.cjs … --upgrade`._
 
 - **Program id (local fork):** `EiZ3npNmrPCkAjskdMR7RDJQcojC9p8CHNr1dR4DPxKr`. The keypair `program-keypair.json` is local only
   (gitignored: a public keypair would let anyone deploy to the address first). Use a fresh one for devnet/mainnet.
-- **.so:** `hookrz_engine.so` + `.sha256` is the stable, **stripped** deployable (145,704 bytes ≈ 0.74 SOL of rent at
-  5,080 lamports/byte). `target/sbpf-solana-solana/release/hookrz_engine.so` is the latest unstripped build (~180 KB, same code).
+- **.so:** `hookrz_engine.so` + `.sha256` is the stable, **stripped** deployable: **137,968 bytes**, sha256
+  `8da568a15f4293410576af0ebaf56dae0a680de3c74d82eea1fece8f7270c0d1` (≈ 0.701 SOL of rent at 5,080 lamports/byte for a fresh
+  deploy; an in-place upgrade keeps the existing 145,704-byte program-data account, so it needs no extra SOL).
+  `target/sbpf-solana-solana/release/hookrz_engine.so` is the latest unstripped build (~157 KB, same code).
+  `fork/fixtures/deployed-v1.so` is the build deployed on devnet (145,704 B, sha256 `1a78d1f9…`), kept for the upgrade test.
 - **Instruction data, accounts, params, layouts:** `LAYOUT.md`. JS encoder/decoder: `js/layout.mjs` (BACKEND wraps it in `server/src/layout.ts`).
+
+## Done (step 6, 22:00): the six remaining hook blocks, all native
+Every hook block in blocks.js now runs on chain: 18 blocks + Hookscript. All six fit natively, with room to spare, because the
+engine lost every bounds-check panic (see Deploy size). No Hookscript fallback was needed.
+
+| Block | Code | Mechanism | Extra accounts | Marginal CU (max of buy/sell/send) |
+|---|---|---|---|---:|
+| blocklist | 6006 | a mark PDA `["mark", mint, owner]` per owner (bit 1), set by the creator with `set_mark` (0xA5) while the list is open: launch slot, or `lock` seconds after launch (24h; `0xFFFFFFFF` = until graduation, when the hook is retired; 0 = launch slot only). Refuses the sender's owner (sells, sends) or the receiver's owner (buys, sends) | 2 (both owners' marks; account-data seeds) | 134 |
+| allowlist-phase | 6007 | the same mark, bit 2 = pass, granted by the creator any time; buys during the first `minutes` need a pass. The creator's launch-slot buy is exempt | 2 (shared with Blocklist) | 133 |
+| seasoned-sells | 6013 | wallet record's first receipt: cap = srcBefore × min(100, base + step × hours)% | the 2 wallet records | 1,507 (the wallet-record path) |
+| outflow-cap | 6014 | slot state `hour since launch · sold`, the bucketed counter Anti-Bundle already used (shared code); Stack writable | 0 | 170 |
+| token-gate | 6017 | init_stack takes the gate mint; the meta list derives the receiver owner's ATA of it (external PDA of the ATA program, seeds from account data); param = raw minimum | 4 (gate mint, its token program, ATA program, the ATA) | 113 |
+| chapters | 6018 | DBC `quote_reserve` / stored threshold (as Lock-in), exact integer `chapterOf`; cap = first_bps << chapter | 1 (the pool) | 526 |
+
+New instruction **`set_mark` (0xA5)**, creator-signed (LAYOUT.md).
+
+Bytes each block adds to the stripped .so, measured by building the final source without it (all six: +11,392):
+
+| Block(s) | Bytes |
+|---|---:|
+| blocklist + allowlist-phase + `set_mark` + the two mark metas (shared; the allowlist check itself is ~50 B) | 5,592 |
+| token-gate (init_stack gate mint, 4 metas incl. the external ATA PDA, the ATA read) | 4,152 |
+| seasoned-sells | 856 |
+| outflow-cap (shares Anti-Bundle's bucketed counter) | 528 |
+| chapters | 520 |
 
 ## Done (steps 1–5)
 1. Execute (C1 anti-forgery, buy/sell/send against the base vault), init_stack (creator-only, once → 6143), open_wallet,
@@ -56,8 +85,9 @@ Sandwich Guard send taint, close paths (6142, then refunds), M1 pre-funded PDAs,
 vars), staged scripts, a script reading the DBC fee, and the compiled king-of-the-hill.hs and hot-potato.hs examples. BACKEND's e2e
 (`server/tests/e2e-fork.test.ts`) runs the engine against the real DBC binary (launch, refusals, graduation, close).
 
-## Deploy size (20:20)
-Goal: ≤ 148,000 bytes deployed without dropping features. Done: **145,704 bytes** stripped, every feature and test kept.
+## Deploy size (22:00)
+Goal: ≤ 147,400 bytes deployed (about 0.75 SOL) with all 18 blocks. Done: **137,968 bytes** stripped, 7,736 bytes smaller
+than the deployed 12-block build.
 
 | Step | .so bytes (unstripped / stripped) |
 |---|---:|
@@ -66,10 +96,16 @@ Goal: ≤ 148,000 bytes deployed without dropping features. Done: **145,704 byte
 | 2. pinocchio 0.11 + pinocchio-system (zero-copy entrypoint, `no_std`, no allocator, non-formatting panic handler) | 192,552 / 168,672 |
 | 3. One non-generic `create_pda`; no 128-bit division in the engine (u64 maths for the fee base and curve progress) | – / 166,592 |
 | 4. `opt-level = "z"` for everything | 177,888 / 142,368 (but wallet-record CU ×2.5) |
-| 5. **Final:** engine at `opt-level = 3`, dependencies (VM, pinocchio) at `"z"`; ASCII-only log text (no UTF-8 validator) | – / **145,704** |
-| (for reference) the same without the Hookscript VM (`--no-default-features`) | – / 86,800 |
+| 5. Engine at `opt-level = 3`, dependencies (VM, pinocchio) at `"z"`; ASCII-only log text (no UTF-8 validator) | – / 145,704 (deployed) |
+| 6. Same 12 blocks with no bounds-check panics in the engine: account data is read through fixed-size array views (`head::<N>()`: one length check per account, then every field offset is checked at compile time), slots and lots via `as_chunks`, `p: &[u8; 24]` params, `get()` for variable data. Each removed panic site was ~60 B (call, `lddw` of a Location, a 16-byte relocation; 142 sites). The 17 static `Error Code: … Error Number: …` strings (an `lddw` + relocation each) became one names table with compile-time offsets; the line is built in a stack buffer | – / 126,576 (measured: the final source minus the six blocks) |
+| 7. **Final: + the six blocks, `set_mark`, mark and gate metas** | 156,680 / **137,968** |
+| (for reference) the same without the Hookscript VM (`--no-default-features`) | – / 86,800 (12 blocks, 20:20); 74,272 now (18 blocks) |
 
-What's in the 145,704: ~58 KB is the Hookscript VM (run, verify/analyze at init, window sums, clock/moon/daylight maths),
+Left on the table, if size is ever needed again: core's panic formatting is still linked by three `copy_from_slice` calls in the
+Hookscript VM (`exec`, `ring_read`, `ring_write`); making those infallible would drop `<u64 as Display>::fmt`, `pad_integral` and
+`do_count_chars` (~3.5 KB). The engine at `opt-level = 2` is another ~2.6 KB smaller (not measured for CU).
+
+What was in the 145,704 (before step 6): ~58 KB is the Hookscript VM (run, verify/analyze at init, window sums, clock/moon/daylight maths),
 ~12 KB the 12 blocks, the rest the engine (Execute, init_stack, wallet records, CPIs) and ~5 KB of core's panic-message
 plumbing (bounds-check panics reference number Display even though the handler never formats; removing that needs
 `build-std` with `panic_immediate_abort`, which the platform-tools toolchain doesn't offer). The VM's `format_reason` is no
@@ -83,7 +119,23 @@ LAYOUT.md, Execute). `server/src/service.ts explain()` takes the text after `Hoo
 `{}` where the value goes; BACKEND should fill it with the TS `format_reason` from the numbers line (or from its own quote).
 All error codes and the `Error Code: … Error Number: …` lines are unchanged.
 
-## Changes BACKEND should know
+## Changes BACKEND should know (22:00, done in server/)
+- `js/layout.mjs`: BLOCK_IDS + packParams for the six blocks; `IX.setMark`, `setMarkData`, `SEEDS.mark`, `MARK`, `decodeMark`,
+  `gateOf`, `hourSoldOf`, `GATE_TOKENS` ($BONK/$WIF/$JUP mainnet mints; $HOOKRZ has none and is refused), `BLOCKLIST_LOCK`.
+  Token Gate packs `minRaw` (whole `min` × 10^decimals of the gate mint).
+- `server/src/layout.ts` meta-list order (marks, then gate mint, token program, ATA program, ATA), `initStackAccounts` gate
+  mint, `setMarkAccounts`; `hook.ts` `setMarkIx`, `markPda`, `readMark`, `extrasFromStack`; new `server/src/marks.ts`
+  (gate resolution, marks list/read/prepare, fork stand-in gate mints).
+- Launch: `resolveGate` maps the ticker to a mint on this network (`HOOKRZ_GATE_MINTS='{"$BONK":"<mint>"}'` overrides; devnet has
+  none of the mainnet mints) → `GATE_NOT_LIVE` / `GATE_MINT_MISSING` at prepare. `body.marks: [{ owner, blocked?, pass? }]` are
+  written in the init_stack transaction (the only way to fill a Blocklist that freezes "immediately"; 3 marks fit beside a creator buy).
+- Endpoints: `GET /v1/coins/:mint/marks`, `GET /v1/coins/:mint/marks/:owner`, `POST /v1/coins/:mint/marks/prepare`
+  (creator-only; unsigned set_mark txs, ~13 per tx; `BLOCKLIST_FROZEN` when the block bit can't change).
+- Swaps: the DBC SDK resolves hook accounts with dummy keys, which throws on account-data seeds; `market.ts buildSwap` now
+  rebuilds the list from the Stack's flags for stacks with marks or a Token Gate (`extrasFromStack`). Other stacks are unchanged.
+- Quotes: `buildCtx` takes the trader's mark flags and gate balance (`traderLists`); the creator-buy check reads the creator's gate balance.
+
+## Changes BACKEND should know (earlier)
 - Wallet record is **328 bytes** (was 224); `js/layout.mjs` decodeWallet reads the new fields.
 - A Custom slot adds the pool and both wallet records to the meta list; a script with the APP flag (header byte 3 & 0x08)
   also adds the instructions sysvar. `server/src/layout.ts metaListEntries` needs both for scripted stacks.
@@ -95,6 +147,11 @@ All error codes and the `Error Code: … Error Number: …` lines are unchanged.
   (and need the claimer's Wallet record on stacks that keep records).
 
 ## Known gaps
+- Marks are never closed (65 B each, ~0.0013 SOL, paid by the creator); a close path after the hook is retired is not written.
+- Third-party clients that resolve hook accounts with the spl-token / DBC SDK resolver before the buyer's token account exists
+  (or with dummy accounts) can't build swaps for Blocklist / Allowlist / Token Gate coins; hookrz's own builder can. The whole
+  `transfer_checked` (Token-2022's PDA derivations for marks and the gate ATA plus the engine) is ~55k–70k CU for those stacks.
+- Blocklist marks are per owner: a blocked holder can still use a fresh wallet (as with any blocklist).
 - Hookscript `fee_bps` has no dynamic fee (BACKEND's configs don't enable it).
 - Sell Cooldown can be split across wallets (sybil), by design.
 - Creator Vesting holds every creator-owned token account to the launch-bag line (normally there is only the ATA).
@@ -105,6 +162,33 @@ All error codes and the `Error Code: … Error Number: …` lines are unchanged.
 ## CU (LiteSVM, engine's own Execute CU from the program log; pinocchio build)
 Each block alone, on a passing transfer with history (5 receipt lots, a prior sell, a linear sniper-fee schedule).
 "marginal" = max over kinds minus the base. The pinocchio entrypoint halved the base cost (was ~2,650).
+
+Current build (22:00). The array-view rewrite also cut the engine base by ~100 CU and the wallet-record path by ~450 CU.
+
+| Block | buy | sell | send | marginal |
+|---|---:|---:|---:|---:|
+| engine base (dispatch, C1 checks, Stack, classification; 1 trivial slot) | 1,112 | 1,107 | 1,088 | |
+| blocklist (both marks exist) | 1,191 | 1,193 | 1,222 | 134 |
+| allowlist-phase (pass granted) | 1,196 | 1,192 | 1,221 | 133 |
+| seasoned-sells (wallet records) | 1,851 | 2,036 | 2,595 | 1,507 |
+| outflow-cap (slot state) | 1,152 | 1,277 | 1,141 | 170 |
+| token-gate (gate ATA read) | 1,212 | 1,174 | 1,201 | 113 |
+| chapters (pool read) | 1,638 | 1,203 | 1,197 | 526 |
+| hold-timer (wallet records + lots) | 1,881 | 2,013 | 2,718 | 1,630 |
+| circuit-breaker | 2,664 | 2,661 | 1,556 | 1,554 |
+| custom: heavy (gas_max 7,725) | 9,646 | 9,810 | 11,300 | 10,212 |
+
+| Worst-case 6-slot stack (current build) | buy | sell | send |
+|---|---:|---:|---:|
+| hold-timer + circuit-breaker + anti-bundle + rising-max + creator-vest + custom (heavy) | 12,023 | 11,967 | **12,655** |
+| hold-timer + circuit-breaker + token-gate + blocklist + seasoned-sells + custom (heavy) | 11,913 | 12,260 | 12,605 |
+| token-gate + allowlist-phase + outflow-cap + circuit-breaker + hold-timer + custom (heavy) | 11,924 | 12,265 | 12,610 |
+| hold-timer + circuit-breaker + allowlist-phase + chapters + creator-vest + custom (heavy) | 12,245 | 12,059 | 12,501 |
+
+Worst case **12,655 CU** (budget 30,000), down from 13,481. Full table: `fork/cu.json` (`node fork/cu.mjs`). The whole
+`transfer_checked` for stacks with marks or a Token Gate is 52k–70k CU (Token-2022 derives the mark and ATA PDAs).
+
+Previous build (20:20, for reference):
 
 | Block | buy | sell | send | marginal |
 |---|---:|---:|---:|---:|
@@ -156,17 +240,28 @@ swaps should set a compute-unit limit.
 ```
 export PATH=$HOME/.cache/solana/v1.57/platform-tools/rust/bin:$HOME/.cache/solana/v1.57/platform-tools/llvm/bin:$PATH CARGO_HOME=$HOME/.cache/solana/cargo-home
 cargo build --release --target sbpf-solana-solana          # → target/sbpf-solana-solana/release/hookrz_engine.so (with the VM)
-llvm-objcopy --strip-all target/sbpf-solana-solana/release/hookrz_engine.so hookrz_engine.so   # the deployable (145,704 B)
+llvm-objcopy --strip-all target/sbpf-solana-solana/release/hookrz_engine.so hookrz_engine.so   # the deployable (137,968 B)
 cargo build --release --target sbpf-solana-solana --no-default-features   # without the VM (refuses scripted stacks)
-cargo test --release                                       # host unit tests (11) + fixture verify + parity vectors (9,625)
+cargo test --release                                       # host unit tests (14) + fixture verify + parity vectors (19,870)
 node vectors/gen.mjs                                       # regenerate vectors from web/src/engine (then cargo test)
 cargo run --release --example hs_fixtures                  # re-assemble empty/koth/feegate (heavy, koth-example, hot-potato come from hookscript/)
-cd fork && npm install && npm test                         # LiteSVM fork tests (17)
-cd fork && npm run test:any-address                        # the same 17 with the .so loaded at another address
+cd fork && npm install && npm test                         # LiteSVM fork tests (27: engine, new-blocks, upgrade)
+cd fork && npm run test:any-address                        # the same 27 with the .so loaded at another address
 cd fork && node cu.mjs                                     # CU table → fork/cu.json
 ```
 
-## Test results
+## Test results (22:00)
+- Parity: **19,870 / 19,870** vectors pass: the original 9,625 (byte-identical apart from four neutral ctx fields) plus
+  10,245 for the six new blocks (edge cases from each `check()`, 400 random each, 1,500 random stacks over all 18 blocks).
+- Host unit tests: 14 pass (incl. every error line and the lot sort against a stable reference) + the fixture verify test.
+- Fork tests: **27 pass** at the default id and 27 at a random address: the 17 earlier ones, a refusal and a pass for each
+  new block (blocklist ×2 incl. freeze and "immediately", allowlist ×2, seasoned-sells, outflow-cap, token-gate incl. a
+  Token-2022 gate, chapters, every meta kind in one stack), and an in-place upgrade from the deployed build.
+- `cd server && npm test`: **30 pass** (4 new end-to-end tests with the real DBC: Members Club with $BONK, Blocklist + Allowlist
+  via launch marks and the marks endpoints, Seasoned Sells, Hourly Outflow Cap; JS quote and chain agree on every trade).
+  `npx tsc --noEmit` clean. `cd web && npm test`: 31 pass.
+
+## Test results (20:20)
 - Parity: 9,625 / 9,625 vectors pass (12 block files incl. 2,668 Creator Vesting cases, 1,501 random multi-block stacks,
   the 8 engine.test.mjs cases). The generator dropped 2 circuit-breaker vectors where the float reference can't resolve 1 raw
   unit at the band edge.

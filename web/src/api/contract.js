@@ -20,6 +20,8 @@ export const ENDPOINTS = [
   { method: 'GET', path: '/v1/coins/:mint', fn: 'coin', group: 'Coins', desc: 'One coin: metadata, stack with live block state, curve, fee split, lineage.' },
   { method: 'GET', path: '/v1/coins/:mint/trades', fn: 'trades', group: 'Coins', desc: 'Recent transfers with the engine\'s verdict per block (landed or refused + error code).' },
   { method: 'GET', path: '/v1/coins/:mint/holders', fn: 'holders', group: 'Coins', desc: 'Top holders, with Wallet-record state (lots, cooldowns, tiers) when the stack keeps it.' },
+  { method: 'GET', path: '/v1/coins/:mint/marks', fn: 'marks', group: 'Coins', desc: 'The coin\'s Blocklist and Allowlist passes, read from chain: one mark per wallet address (blocked, pass).' },
+  { method: 'GET', path: '/v1/coins/:mint/marks/:owner', fn: 'mark', group: 'Coins', desc: 'One wallet\'s mark on a coin: blocked, has a pass.' },
   { method: 'POST', path: '/v1/quote', fn: 'quote', group: 'Trade', desc: 'Rule-aware quote. If the stack would refuse, returns refusedBy + the largest amount that passes now.' },
   { method: 'POST', path: '/v1/trade/prepare', fn: 'prepareTrade', group: 'Trade', desc: 'Unsigned router swap with hook accounts resolved and the Wallet record opened if needed.' },
   { method: 'POST', path: '/v1/stacks/validate', fn: 'validate', group: 'Stacks', desc: 'CU, extra accounts, rent, route compatibility and warnings for a proposed stack.' },
@@ -31,6 +33,9 @@ export const ENDPOINTS = [
   { method: 'POST', path: '/v1/launch/submit', fn: 'submitLaunch', group: 'Launch', desc: 'Relays the signed launch, waits for confirmation, indexes the coin.' },
   { method: 'GET', path: '/v1/creators/:wallet', fn: 'creator', group: 'Own', desc: 'A creator\'s coins, their rulebooks, and claimable creator fees.' },
   { method: 'POST', path: '/v1/fees/claim/prepare', fn: 'prepareClaim', group: 'Own', desc: 'Unsigned claim of creator fees from the curve pool.' },
+  { method: 'POST', path: '/v1/coins/:mint/marks/prepare', fn: 'prepareMarks', group: 'Own', desc: 'Unsigned set_mark transactions for the creator: block or unblock wallets until the Blocklist freezes, grant or revoke Allowlist passes. Body: creator, marks [{ owner, blocked?, pass? }].' },
+  { method: 'GET', path: '/v1/coins/:mint/keeper', fn: 'coinKeeper', group: 'Keeper', desc: 'The coin\'s fee routing and keeper ledger: claimed, kept, paid and burned per rule, what is still owed, and every claim, burn and payout with its transaction.' },
+  { method: 'GET', path: '/v1/keeper', fn: 'keeper', group: 'Keeper', desc: 'The public keeper: its loop and platform key, every keeper coin\'s totals and the latest actions.' },
   { method: 'WS', path: '/v1/stream?mint=', fn: 'stream', group: 'Live', desc: 'Push stream of transfers and verdicts, curve ticks and keeper actions.' },
 ];
 
@@ -48,7 +53,7 @@ export const FEES = {
   draft: true,
   tradeFeePct: 1.0,
   split: [
-    { who: 'Creator', pct: 50, note: 'Claimed straight from the curve pool. Fee-funded rules (burns, rewards, tithes) spend from this share.' },
+    { who: 'Creator', pct: 50, note: 'Claimed straight from the curve pool. Keeper rules (burns, rewards, tithes, script payouts) spend from this share: their part is routed to the keeper at launch and every payout is public.' },
     { who: 'hookrz', pct: 50, note: 'Platform share: engine audits, the public keeper, the API.' },
   ],
   launchCostSol: 0.02,

@@ -71,6 +71,10 @@ export function buildCtx(a: {
   wallet: ReturnType<typeof walletState>; isCreatorLaunchBuy?: boolean;
   /** Creator Vesting's launch bag (whole tokens) from the Stack; undefined = unknown (the check then uses the balance). */
   creatorBase?: number;
+  /** The trader's mark flags (1 blocked, 2 pass; Blocklist / Allowlist Phase); undefined = unknown (not blocked, has a pass). */
+  marks?: number;
+  /** The receiver's gate-token balance (whole gate tokens; Token Gate); undefined = unknown (treated as holding the gate). */
+  gateBal?: number;
 }): Ctx {
   const isCreator = !!a.owner && a.owner === a.coin.creator;
   return {
@@ -78,7 +82,8 @@ export function buildCtx(a: {
     progress: a.progress, priceAfter: a.priceAfter, windowOpenPrice: a.market.windowOpenPrice,
     srcBefore: a.kind === "buy" ? 0 : a.balance, dstAfter: a.kind === "sell" ? 0 : (a.dstBalance ?? a.balance) + a.tokens,
     isCreatorSrc: isCreator && a.kind !== "buy", isCreator: !!a.isCreatorLaunchBuy, w: a.wallet,
-    slotBuys: a.market.slotBuys, hourSold: a.market.hourSold, hasPass: true, gateBal: 0, blocked: false,
+    slotBuys: a.market.slotBuys, hourSold: a.market.hourSold,
+    hasPass: a.marks === undefined ? true : (a.marks & 2) !== 0, gateBal: a.gateBal ?? Number.POSITIVE_INFINITY, blocked: ((a.marks ?? 0) & 1) !== 0,
     ...(a.creatorBase !== undefined ? { creatorBase: a.creatorBase } : {}),
   };
 }

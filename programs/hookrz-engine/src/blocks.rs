@@ -20,13 +20,19 @@ pub const ANTI_BUNDLE: u16 = 2;
 pub const MAX_WALLET: u16 = 3;
 pub const RISING_MAX: u16 = 4;
 pub const SANDWICH_GUARD: u16 = 5;
+pub const BLOCKLIST: u16 = 6;
+pub const ALLOWLIST: u16 = 7;
 pub const SELL_CAP: u16 = 8;
 pub const SELL_COOLDOWN: u16 = 9;
 pub const HOLD_TIMER: u16 = 10;
 pub const CIRCUIT_BREAKER: u16 = 11;
 pub const TRADING_HOURS: u16 = 12;
+pub const SEASONED_SELLS: u16 = 13;
+pub const OUTFLOW_CAP: u16 = 14;
 pub const LOCK_IN: u16 = 15;
 pub const CREATOR_VEST: u16 = 16;
+pub const TOKEN_GATE: u16 = 17;
+pub const CHAPTERS: u16 = 18;
 /// The Hookscript slot. Its check is a no-op; the script itself runs after every slot.
 pub const CUSTOM: u16 = 128;
 
@@ -42,13 +48,19 @@ pub fn name_of(code: u32) -> &'static str {
         6003 => "MaxWalletExceeded",
         6004 => "RisingCapExceeded",
         6005 => "SandwichLockout",
+        6006 => "Blocklisted",
+        6007 => "NoAllowlistPass",
         6008 => "SellCapExceeded",
         6009 => "SellCooldown",
         6010 => "StillSettling",
         6011 => "CircuitBreaker",
         6012 => "MarketClosed",
+        6013 => "NotSeasoned",
+        6014 => "HourlyOutflowCap",
         6015 => "LockInPhase",
         6016 => "CreatorVesting",
+        6017 => "TokenGated",
+        6018 => "ChapterCap",
         6128 => "CustomRuleRefused",
         6141 => "MissingWalletRecord",
         6142 => "HookLive",
@@ -108,30 +120,50 @@ pub struct Ctx {
     pub slot_buys: u64,
     /// The creator's launch bag (Creator Vesting state): what the creator bought in the slot of its first buy.
     pub creator_base: u64,
+    /// Blocklist: the sender (sells, sends) or the receiver (buys, sends) has a block mark.
+    pub blocked: bool,
+    /// Allowlist Phase: the receiver has a pass mark.
+    pub has_pass: bool,
+    /// Hourly Outflow Cap: raw units sold to the curve in the current hour since launch (slot state).
+    pub hour_sold: u64,
+    /// Token Gate: the receiver owner's balance of the gate mint (raw units of the gate mint).
+    pub gate_bal: u64,
 }
 
-pub fn u16_at(p: &[u8], at: usize) -> u16 {
+// Readers over fixed-size arrays: with a constant `at` the compiler proves every index in bounds, so the
+// program carries no bounds-check panics (and none of core's panic-formatting code).
+#[inline(always)]
+pub fn u16_at<const N: usize>(p: &[u8; N], at: usize) -> u16 {
     u16::from_le_bytes([p[at], p[at + 1]])
 }
-pub fn u32_at(p: &[u8], at: usize) -> u32 {
+#[inline(always)]
+pub fn u32_at<const N: usize>(p: &[u8; N], at: usize) -> u32 {
     u32::from_le_bytes([p[at], p[at + 1], p[at + 2], p[at + 3]])
+}
+#[inline(always)]
+pub fn u64_at<const N: usize>(p: &[u8; N], at: usize) -> u64 {
+    u64::from_le_bytes([p[at], p[at + 1], p[at + 2], p[at + 3], p[at + 4], p[at + 5], p[at + 6], p[at + 7]])
 }
 
 /// `a * 10_000 > supply * bps`, i.e. a > supply * bps / 10_000, exactly.
-fn over_bps(a: u64, supply: u64, bps: u16) -> bool {
+fn over_bps(a: u64, supply: u64, bps: u64) -> bool {
     (a as u128) * 10_000 > (supply as u128) * (bps as u128)
 }
 
 /// Does block `id` with packed `params` refuse this transfer? (`true` = refuse.)
 /// Unknown ids never refuse here; `validate` keeps them out of a Stack.
-pub fn check(id: u16, p: &[u8], c: &Ctx) -> bool {
+pub fn check(id: u16, p: &[u8; PARAMS], c: &Ctx) -> bool {
     match id {
         // c.kind === 'buy' && !c.isCreator && c.t < p.window && c.amount > c.supply * p.max / 100
         SNIPE_SHIELD => {
             let window = u32_at(p, 0) as i64;
-            let max_bps = u16_at(p, 4);
+            let max_bps = u16_at(p, 4) as u64;
             c.kind == Kind::Buy && !c.is_creator && c.t < window && over_bps(c.amount, c.supply, max_bps)
         }
+        // c.blocked
+        BLOCKLIST => c.blocked,
+        // c.kind === 'buy' && !c.isCreator && c.t < p.minutes * 60 && !c.hasPass
+        ALLOWLIST => c.kind == Kind::Buy && !c.is_creator && c.t < u32_at(p, 0) as i64 && !c.has_pass,
         // c.kind === 'buy' && !c.isCreator && c.t < p.window * 60 && c.slotBuys >= p.perSlot
         ANTI_BUNDLE => {
             let window = u32_at(p, 0) as i64;
@@ -139,7 +171,7 @@ pub fn check(id: u16, p: &[u8], c: &Ctx) -> bool {
             c.kind == Kind::Buy && !c.is_creator && c.t < window && c.slot_buys >= per_slot
         }
         // c.kind !== 'sell' && c.dstAfter > c.supply * p.pct / 100
-        MAX_WALLET => c.kind != Kind::Sell && over_bps(c.dst_after, c.supply, u16_at(p, 0)),
+        MAX_WALLET => c.kind != Kind::Sell && over_bps(c.dst_after, c.supply, u16_at(p, 0) as u64),
         // c.kind !== 'sell' && c.dstAfter > c.supply * capAt(p, c.t) / 100
         RISING_MAX => c.kind != Kind::Sell && over_rising_cap(c.dst_after, c.supply, u16_at(p, 0), u16_at(p, 2), u32_at(p, 4), c.t),
         // c.kind === 'sell' && c.w.lastBuySlot != null && c.slot - c.w.lastBuySlot < p.slots
@@ -148,7 +180,7 @@ pub fn check(id: u16, p: &[u8], c: &Ctx) -> bool {
             c.kind == Kind::Sell && matches!(c.w.last_buy_slot, Some(b) if (c.slot as i128) - (b as i128) < slots)
         }
         // c.kind === 'sell' && c.amount > c.supply * p.pct / 100
-        SELL_CAP => c.kind == Kind::Sell && over_bps(c.amount, c.supply, u16_at(p, 0)),
+        SELL_CAP => c.kind == Kind::Sell && over_bps(c.amount, c.supply, u16_at(p, 0) as u64),
         // c.kind === 'sell' && c.w.lastSellT != null && c.t - c.w.lastSellT < p.minutes * 60
         SELL_COOLDOWN => {
             let secs = u32_at(p, 0) as i128;
@@ -160,6 +192,26 @@ pub fn check(id: u16, p: &[u8], c: &Ctx) -> bool {
         CIRCUIT_BREAKER => c.kind != Kind::Send && c.sqrt_open > 0 && outside_band(c.sqrt_after, c.sqrt_open, u16_at(p, 4)),
         // c.kind !== 'send' && !(c.hour >= p.open && c.hour < p.close)
         TRADING_HOURS => c.kind != Kind::Send && !(c.hour >= p[0] as u32 && c.hour < p[1] as u32),
+        // c.kind === 'sell' && c.w.firstT != null
+        //   && c.amount > c.srcBefore * Math.min(1, (p.base + p.step * Math.floor((c.t - c.w.firstT) / 3600)) / 100)
+        SEASONED_SELLS => {
+            c.kind == Kind::Sell
+                && match c.w.first_t {
+                    // Hours held, capped at 100 (base + step x 100 >= 100% for every valid step).
+                    Some(f) => {
+                        let hours = (c.t.saturating_sub(f).max(0) / 3_600).min(100) as u64;
+                        let pct = (p[0] as u64 + p[1] as u64 * hours).min(100);
+                        over_bps(c.amount, c.src_before, pct * 100)
+                    }
+                    None => false,
+                }
+        }
+        // c.kind === 'sell' && c.hourSold + c.amount > c.supply * p.pct / 100
+        OUTFLOW_CAP => c.kind == Kind::Sell && over_bps(c.hour_sold.saturating_add(c.amount), c.supply, u16_at(p, 0) as u64),
+        // c.kind !== 'sell' && !(c.gateBal >= p.min)
+        TOKEN_GATE => c.kind != Kind::Sell && c.gate_bal < u64_at(p, 0),
+        // c.kind === 'buy' && c.dstAfter > c.supply * (p.first * 2 ** chapterOf(p, c.progress)) / 100
+        CHAPTERS => c.kind == Kind::Buy && over_bps(c.dst_after, c.supply, (u16_at(p, 0) as u64) << chapter(c.quote_reserve, c.threshold, p[2]).min(40)),
         // c.kind === 'sell' && c.progress * 100 < p.pct
         LOCK_IN => c.kind == Kind::Sell && (c.quote_reserve as u128) * 10_000 < (u16_at(p, 0) as u128) * (c.threshold as u128),
         // c.isCreatorSrc && c.kind !== 'buy' && c.srcBefore - c.amount < vestLocked(p, c.t, c.creatorBase)
@@ -168,10 +220,21 @@ pub fn check(id: u16, p: &[u8], c: &Ctx) -> bool {
     }
 }
 
+/// Chapters: chapterOf = min(n - 1, floor(progress * n)) with progress = quote_reserve / threshold, exactly
+/// (no division: the chapter is the number of slices k in 1..n with quote_reserve * n >= k * threshold).
+pub fn chapter(quote_reserve: u64, threshold: u64, n: u8) -> u32 {
+    let qn = quote_reserve as u128 * n as u128;
+    let mut k = 0u32;
+    while k + 1 < n as u32 && qn >= (k as u128 + 1) * threshold as u128 {
+        k += 1;
+    }
+    k
+}
+
 /// Rising Max: dst > supply * cap(t), cap(t) = from + (to - from) * clamp(t / secs, 0, 1), exactly.
 pub fn over_rising_cap(dst: u64, supply: u64, from_bps: u16, to_bps: u16, secs: u32, t: i64) -> bool {
     if secs == 0 {
-        return over_bps(dst, supply, to_bps);
+        return over_bps(dst, supply, to_bps as u64);
     }
     let s = secs as u128;
     let tc = t.clamp(0, secs as i64) as u128;
@@ -301,17 +364,24 @@ pub fn progress_ppm(quote_reserve: u64, threshold: u64) -> u32 {
     (a * 1_000_000 / b) as u32
 }
 
-/// Lots with an amount, oldest first (for Hookscript).
+/// Lots with an amount, oldest first (for Hookscript); the rest zeroed. A stable insertion sort; the
+/// explicit `< LOTS` guards let the compiler prove every index in bounds (no panic paths).
+#[inline(never)]
 pub fn sorted_lots(lots: &[Lot; LOTS]) -> ([Lot; LOTS], u8) {
     let mut out = [Lot::default(); LOTS];
     let mut n = 0usize;
-    for l in lots.iter().filter(|l| l.amount > 0) {
+    for l in lots {
+        if l.amount == 0 || n >= LOTS {
+            continue;
+        }
         let mut i = n;
-        while i > 0 && out[i - 1].t > l.t {
+        while i > 0 && i < LOTS && out[i - 1].t > l.t {
             out[i] = out[i - 1];
             i -= 1;
         }
-        out[i] = *l;
+        if i < LOTS {
+            out[i] = *l;
+        }
         n += 1;
     }
     (out, n as u8)
@@ -385,28 +455,35 @@ pub fn known(id: u16) -> bool {
             | MAX_WALLET
             | RISING_MAX
             | SANDWICH_GUARD
+            | BLOCKLIST
+            | ALLOWLIST
             | SELL_CAP
             | SELL_COOLDOWN
             | HOLD_TIMER
             | CIRCUIT_BREAKER
             | TRADING_HOURS
+            | SEASONED_SELLS
+            | OUTFLOW_CAP
             | LOCK_IN
             | CREATOR_VEST
+            | TOKEN_GATE
+            | CHAPTERS
             | CUSTOM
     )
 }
 
 /// Params within the site's ranges, and unused param bytes zero. See LAYOUT.md.
-pub fn valid_params(id: u16, p: &[u8]) -> bool {
+pub fn valid_params(id: u16, p: &[u8; PARAMS]) -> bool {
     let used = match id {
         SNIPE_SHIELD | ANTI_BUNDLE | CIRCUIT_BREAKER => 6,
-        RISING_MAX | CREATOR_VEST => 8,
-        MAX_WALLET | SELL_CAP | LOCK_IN | TRADING_HOURS => 2,
-        SANDWICH_GUARD | SELL_COOLDOWN | HOLD_TIMER => 4,
+        RISING_MAX | CREATOR_VEST | TOKEN_GATE => 8,
+        MAX_WALLET | SELL_CAP | LOCK_IN | TRADING_HOURS | SEASONED_SELLS | OUTFLOW_CAP => 2,
+        SANDWICH_GUARD | SELL_COOLDOWN | HOLD_TIMER | BLOCKLIST | ALLOWLIST => 4,
+        CHAPTERS => 3,
         CUSTOM => 0,
         _ => return false,
     };
-    if p.len() != PARAMS || p[used..].iter().any(|&b| b != 0) {
+    if p[used..].iter().any(|&b| b != 0) {
         return false;
     }
     let r16 = |at: usize, lo: u16, hi: u16| (lo..=hi).contains(&u16_at(p, at));
@@ -425,22 +502,36 @@ pub fn valid_params(id: u16, p: &[u8]) -> bool {
         TRADING_HOURS => p[0] <= 23 && (1..=24).contains(&p[1]) && p[0] < p[1],
         LOCK_IN => r16(0, 1_000, 6_000),
         CREATOR_VEST => r32(0, 0, 30 * 86_400) && r32(4, 7 * 86_400, 365 * 86_400),
+        // The list freezes: at graduation (never while the hook is live), 24 h after launch, or at launch.
+        BLOCKLIST => matches!(u32_at(p, 0), BLOCKLIST_AT_GRADUATION | 86_400 | 0),
+        ALLOWLIST => r32(0, 5 * 60, 1_440 * 60),
+        SEASONED_SELLS => (5..=50).contains(&p[0]) && (5..=50).contains(&p[1]),
+        OUTFLOW_CAP => r16(0, 100, 2_000),
+        TOKEN_GATE => u64_at(p, 0) > 0,
+        CHAPTERS => r16(0, 25, 300) && (2..=5).contains(&p[2]),
         CUSTOM => true,
         _ => false,
     }
 }
 
+/// Blocklist `lock` value: the list can change for as long as the hook is live (it is retired at graduation).
+pub const BLOCKLIST_AT_GRADUATION: u32 = u32::MAX;
+
 /// Blocks that read or write the wallet records (Wallet(src), Wallet(dst) in the meta list).
 pub fn needs_wallets(id: u16) -> bool {
-    matches!(id, SANDWICH_GUARD | SELL_COOLDOWN | HOLD_TIMER | CUSTOM)
+    matches!(id, SANDWICH_GUARD | SELL_COOLDOWN | HOLD_TIMER | SEASONED_SELLS | CUSTOM)
 }
 /// Blocks that read the DBC pool.
 pub fn needs_pool(id: u16) -> bool {
-    matches!(id, CIRCUIT_BREAKER | LOCK_IN)
+    matches!(id, CIRCUIT_BREAKER | LOCK_IN | CHAPTERS)
 }
 /// Blocks that write their slot state (the Stack becomes writable on every transfer).
 pub fn writes_stack(id: u16) -> bool {
-    matches!(id, ANTI_BUNDLE | CIRCUIT_BREAKER | CREATOR_VEST)
+    matches!(id, ANTI_BUNDLE | CIRCUIT_BREAKER | CREATOR_VEST | OUTFLOW_CAP)
+}
+/// Blocks that read the owners' marks (Mark(src owner), Mark(dst owner) in the meta list).
+pub fn needs_marks(id: u16) -> bool {
+    matches!(id, BLOCKLIST | ALLOWLIST)
 }
 
 #[cfg(test)]
@@ -506,6 +597,24 @@ mod tests {
             assert!(sorted[..n as usize].windows(2).all(|w| w[0].t < w[1].t));
             // Every receipt of the last 4 hours is still counted.
             assert!(sorted[..n as usize].iter().any(|l| l.t == lot_time(ep.0, t)));
+        }
+    }
+
+    #[test]
+    fn sorted_lots_is_a_stable_sort_of_the_live_lots() {
+        let mut seed = 11u64;
+        for _ in 0..20_000 {
+            let mut lots = [Lot::default(); LOTS];
+            for l in lots.iter_mut() {
+                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                *l = Lot { t: ((seed >> 40) % 4) as i64, amount: (seed >> 20) % 3 };
+            }
+            let mut want: Vec<Lot> = lots.iter().copied().filter(|l| l.amount > 0).collect();
+            want.sort_by_key(|l| l.t); // stable
+            let (got, n) = sorted_lots(&lots);
+            assert_eq!(n as usize, want.len());
+            assert_eq!(&got[..want.len()], &want[..]);
+            assert!(got[want.len()..].iter().all(|l| *l == Lot::default()));
         }
     }
 

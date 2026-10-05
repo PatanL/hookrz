@@ -35,4 +35,7 @@ if (process.env.STATIC_DIR) {
   });
 }
 await app.listen({ port: env.port, host: env.host });
-console.log(`hookrz server (${net}) on http://${env.host}:${env.port} · ${hookWhy}`);
+// The public keeper: one round every KEEPER_TICK_MS (default 60 s; 0 turns the loop off). Rounds are best effort and
+// never block the API or the indexer.
+svc.keeper.start();
+console.log(`hookrz server (${net}) on http://${env.host}:${env.port} · ${hookWhy} · keeper ${svc.keeper.running ? `every ${svc.keeper.opts.tickMs / 1000}s` : "off"}`);

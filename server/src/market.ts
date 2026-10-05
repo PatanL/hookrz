@@ -5,12 +5,12 @@ import { PublicKey, Transaction, ComputeBudgetProgram } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, NATIVE_MINT, TOKEN_PROGRAM_ID, createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync, unpackAccount } from "@solana/spl-token";
 import {
   DynamicBondingCurveClient, DYNAMIC_BONDING_CURVE_PROGRAM_ID, DAMM_V2_PROGRAM_ID, DAMM_V2_MIGRATION_FEE_ADDRESS,
-  deriveDammV2PoolAddress, deriveDbcPoolAuthority, SwapMode,
+  deriveDammV2PoolAddress, deriveDbcPoolAuthority, SwapMode, AccountsType,
 } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { CpAmm } from "@meteora-ag/cp-amm-sdk";
 import BN from "bn.js";
 import { sdkConnection } from "./sdk-connection.js";
-import { resolveHookAccounts, liveHookProgram, type HookProgram } from "./hook.js";
+import { resolveHookAccounts, liveHookProgram, type HookProgram, type HookrzEngine } from "./hook.js";
 import { BASE_DECIMALS, QUOTE_DECIMALS } from "./curve.js";
 import type { Chain } from "./chain.js";
 
@@ -124,13 +124,21 @@ export async function buildSwap(chain: Chain, hook: HookProgram | null, s: Snaps
       tokenAVault: p.tokenAVault, tokenBVault: p.tokenBVault, tokenAProgram: TOKEN_2022_PROGRAM_ID, tokenBProgram: TOKEN_PROGRAM_ID, referralTokenAccount: null, poolState: p,
     } as any);
   } else if (s.hooked && s.hookProgram) {
-    tx = await dbc.pool.swap2WithTransferHook({ owner, pool: s.pool, swapBaseForQuote: side === "sell", swapMode: SwapMode.PartialFill, amountIn: new BN(input.toString()), minimumAmountOut: new BN(minOut.toString()), referralTokenAccount: null } as any);
     const ata = getAssociatedTokenAddressSync(s.mint, owner, true, TOKEN_2022_PROGRAM_ID);
     const [src, dst, auth] = side === "buy" ? [s.baseVault, ata, deriveDbcPoolAuthority()] : [ata, s.baseVault, owner];
+    // Blocklist / Allowlist marks and the Token Gate's ATA derive from the token accounts' owners (account-data seeds).
+    // The DBC SDK resolves with dummy keys and spl-token needs the receiver's account to exist, so for those stacks the
+    // list is rebuilt from the Stack's flags and handed to the SDK.
+    const [srcOwner, dstOwner] = side === "buy" ? [deriveDbcPoolAuthority(), owner] : [owner, deriveDbcPoolAuthority()];
+    const offline = hook?.kind === "hookrz" && hook.id.equals(s.hookProgram) ? await (hook as HookrzEngine).extrasFromStack(chain, s.mint, src, dst, srcOwner, dstOwner, true) : null;
+    const pool = offline
+      ? Object.assign(Object.create(dbc.pool), { getRemainingAccountsForTransferHook: async () => ({ info: { slices: [{ accountsType: AccountsType.TransferHookBase, length: offline.length }] }, accounts: offline }) })
+      : dbc.pool;
+    tx = await pool.swap2WithTransferHook({ owner, pool: s.pool, swapBaseForQuote: side === "sell", swapMode: SwapMode.PartialFill, amountIn: new BN(input.toString()), minimumAmountOut: new BN(minOut.toString()), referralTokenAccount: null } as any);
     const i = tx.instructions.findIndex((x) => x.programId.equals(DYNAMIC_BONDING_CURVE_PROGRAM_ID));
     ensure(i >= 0, "swap instruction missing");
     const swap = tx.instructions[i];
-    const resolved = await resolveHookAccounts(chain, s.mint, src, dst, auth);
+    const resolved = offline ?? (await resolveHookAccounts(chain, s.mint, src, dst, auth));
     // spl-token order: [resolved extras…, hook program, meta list]; DBC takes them as its trailing accounts.
     const tail = swap.keys.slice(-resolved.length);
     ensure(tail.length === resolved.length && tail.at(-2)!.pubkey.equals(s.hookProgram), "Unexpected transfer-hook account layout");

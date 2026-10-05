@@ -21,7 +21,15 @@ const P = {
   'trading-hours': { open: 0, close: 24 },
   'lock-in': { pct: 10 },
   'creator-vest': { cliff: 0, days: 7 },
+  // The six blocks added on 2026-10-04: marks exist (pass granted), the gate ATA holds the gate token.
+  blocklist: { lockAt: 'at graduation' },
+  'allowlist-phase': { minutes: 5 },
+  'seasoned-sells': { base: 50, step: 50 },
+  'outflow-cap': { pct: 20 },
+  'token-gate': { ticker: '$G', min: 1, decimals: 0 },
+  chapters: { n: 5, first: 3 },
 };
+const NEW = ['blocklist', 'allowlist-phase', 'seasoned-sells', 'outflow-cap', 'token-gate', 'chapters'];
 
 /** Engine CU of one transfer of `kind` through `stack` (a list of block ids; 'custom:<fixture>' adds a script). */
 async function measure(ids, kind) {
@@ -33,11 +41,17 @@ async function measure(ids, kind) {
     if (id.startsWith('custom:')) { script = SCRIPTS[id.slice(7)]; return { id: 'custom', params: {} }; }
     return { id, params: P[id] };
   });
-  const r0 = f.initStack(c, slots, { script });
+  const g = ids.includes('token-gate') ? f.gateMint({ decimals: 0 }) : null;
+  const r0 = f.initStack(c, slots, { script, gate: g?.mint });
   if (!r0.ok) throw new Error(`init ${ids}: ${r0.err}`);
   f.setPool(c, { quoteReserve: c.threshold }); // curve full enough for lock-in
   f.warp(61); // past the sniper fee
   const a = f.holder(c), b = f.holder(c);
+  // Worst case for the marks: both owners have one (read), with a pass where the stack has Allowlist Phase.
+  if (ids.includes('blocklist') || ids.includes('allowlist-phase')) {
+    for (const h of [a, b]) { const r = f.setMark(c, h.key.publicKey, ids.includes('allowlist-phase') ? 2 : 0); if (!r.ok) throw new Error(`mark ${ids}: ${r.err}`); }
+  }
+  if (g) for (const h of [a, b]) g.fund(h.key.publicKey, 10n);
   // History: five receipt lots in a's record (worst case for Hold Timer and window sums), a prior sell.
   for (let i = 0; i < 5; i++) {
     const r = await f.buy(c, a, pct(0.2));
@@ -82,6 +96,11 @@ const worst = [
   ['hold-timer', 'circuit-breaker', 'sandwich-guard', 'sell-cooldown', 'lock-in', 'custom:koth'],
   ['hold-timer', 'circuit-breaker', 'sandwich-guard', 'sell-cooldown', 'lock-in', 'custom:heavy'],
   ['hold-timer', 'circuit-breaker', 'anti-bundle', 'rising-max', 'creator-vest', 'custom:heavy'],
+  ['hold-timer', 'circuit-breaker', 'sandwich-guard', 'token-gate', 'blocklist', 'seasoned-sells'],
+  ['hold-timer', 'circuit-breaker', 'token-gate', 'blocklist', 'seasoned-sells', 'custom:heavy'],
+  ['hold-timer', 'circuit-breaker', 'anti-bundle', 'token-gate', 'outflow-cap', 'custom:heavy'],
+  ['hold-timer', 'circuit-breaker', 'allowlist-phase', 'chapters', 'creator-vest', 'custom:heavy'],
+  ['token-gate', 'allowlist-phase', 'outflow-cap', 'circuit-breaker', 'hold-timer', 'custom:heavy'],
 ];
 const worstRows = [];
 for (const st of worst) {

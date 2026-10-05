@@ -8,7 +8,7 @@ import { LiteSVM, FailedTransactionMetadata, TransactionMetadata } from "litesvm
 import { address, getTransactionDecoder, lamports, type Transaction as KitTx } from "@solana/kit";
 import { PublicKey, Keypair, VersionedMessage } from "@solana/web3.js";
 import bs58 from "bs58";
-import { customCode, type Chain, type ChainRead, type Simulation, type TokenBalance, type TxRecord } from "./chain.js";
+import { customCode, matches, type AccountFilter, type Chain, type ChainRead, type ProgramAccount, type Simulation, type TokenBalance, type TxRecord } from "./chain.js";
 
 const TOKEN = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const TOKEN22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
@@ -112,6 +112,12 @@ export class ForkChain implements Chain {
         : null;
     });
     return { slot: Number(c.slot), unix: c.unixTimestamp, accounts };
+  }
+  async programAccounts(program: PublicKey, filters: AccountFilter[]): Promise<ProgramAccount[]> {
+    this.sync();
+    return this.svm.getProgramAccounts(address(program.toBase58()))
+      .filter((a) => matches(a.data as Uint8Array, filters))
+      .map((a) => ({ pubkey: new PublicKey(a.address), account: { owner: new PublicKey(a.programAddress), data: Buffer.from(a.data), executable: a.executable, lamports: Number(a.lamports), rentEpoch: 0 } }));
   }
   async rent(bytes: number) {
     return Number(this.svm.minimumBalanceForRentExemption(BigInt(bytes)));

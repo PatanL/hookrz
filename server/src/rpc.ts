@@ -1,7 +1,8 @@
 // A real cluster (devnet) behind the Chain interface. The indexer feed polls getSignaturesForAddress for
 // the engine program and every watched coin (failed transactions included, so refusals are indexed).
 import { Connection, PublicKey, SYSVAR_CLOCK_PUBKEY, VersionedTransaction, type VersionedTransactionResponse } from "@solana/web3.js";
-import { customCode, type Chain, type ChainRead, type Simulation, type TxRecord, type TokenBalance } from "./chain.js";
+import bs58 from "bs58";
+import { customCode, type AccountFilter, type Chain, type ChainRead, type ProgramAccount, type Simulation, type TxRecord, type TokenBalance } from "./chain.js";
 
 export class RpcChain implements Chain {
   readonly mode = "devnet" as const;
@@ -54,6 +55,13 @@ export class RpcChain implements Chain {
       out.accounts.push(...(value as any));
     }
     return out;
+  }
+  async programAccounts(program: PublicKey, filters: AccountFilter[]): Promise<ProgramAccount[]> {
+    const list = await this.connection.getProgramAccounts(program, {
+      commitment: "confirmed",
+      filters: filters.map((f) => ("dataSize" in f ? { dataSize: f.dataSize } : { memcmp: { offset: f.memcmp.offset, bytes: bs58.encode(f.memcmp.bytes) } })),
+    });
+    return list.map((x) => ({ pubkey: x.pubkey, account: x.account as any }));
   }
   rent(bytes: number) {
     return this.connection.getMinimumBalanceForRentExemption(bytes);

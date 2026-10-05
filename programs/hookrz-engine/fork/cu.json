@@ -1,294 +1,381 @@
 {
  "base": {
   "buy": {
-   "engine": 1209,
-   "tx": 12850
+   "engine": 1112,
+   "tx": 12753
   },
   "sell": {
-   "engine": 1211,
-   "tx": 12852
+   "engine": 1107,
+   "tx": 14248
   },
   "send": {
-   "engine": 1195,
-   "tx": 17336
+   "engine": 1088,
+   "tx": 20229
   }
  },
  "rows": [
   {
    "what": "engine base (dispatch, C1 checks, Stack, classification; 1 trivial slot)",
-   "buy": 1209,
-   "sell": 1211,
-   "send": 1195
+   "buy": 1112,
+   "sell": 1107,
+   "send": 1088
   },
   {
    "what": "snipe-shield",
-   "buy": 1219,
-   "sell": 1206,
-   "send": 1200,
-   "marginal": 10
+   "buy": 1105,
+   "sell": 1094,
+   "send": 1088,
+   "marginal": 0
   },
   {
    "what": "anti-bundle",
-   "buy": 1279,
-   "sell": 1250,
-   "send": 1244,
-   "marginal": 70
+   "buy": 1172,
+   "sell": 1148,
+   "send": 1142,
+   "marginal": 60
   },
   {
    "what": "max-wallet",
-   "buy": 1312,
-   "sell": 1202,
-   "send": 1308,
-   "marginal": 113
+   "buy": 1208,
+   "sell": 1094,
+   "send": 1197,
+   "marginal": 109
   },
   {
    "what": "rising-max",
-   "buy": 1498,
-   "sell": 1200,
-   "send": 1495,
-   "marginal": 300
+   "buy": 1380,
+   "sell": 1095,
+   "send": 1370,
+   "marginal": 282
   },
   {
    "what": "sandwich-guard",
-   "buy": 2188,
-   "sell": 2270,
-   "send": 3164,
-   "marginal": 1969
+   "buy": 1850,
+   "sell": 1923,
+   "send": 2594,
+   "marginal": 1506
   },
   {
    "what": "sell-cap",
-   "buy": 1200,
-   "sell": 1313,
-   "send": 1196,
-   "marginal": 102
+   "buy": 1100,
+   "sell": 1203,
+   "send": 1089,
+   "marginal": 96
   },
   {
    "what": "sell-cooldown",
-   "buy": 2187,
-   "sell": 2274,
-   "send": 3163,
-   "marginal": 1968
+   "buy": 1852,
+   "sell": 1930,
+   "send": 2596,
+   "marginal": 1508
   },
   {
    "what": "hold-timer",
-   "buy": 2219,
-   "sell": 2364,
-   "send": 3307,
-   "marginal": 2112
+   "buy": 1881,
+   "sell": 2013,
+   "send": 2718,
+   "marginal": 1630
   },
   {
    "what": "circuit-breaker",
-   "buy": 2780,
-   "sell": 2784,
-   "send": 1670,
-   "marginal": 1573
+   "buy": 2664,
+   "sell": 2661,
+   "send": 1556,
+   "marginal": 1554
   },
   {
    "what": "lock-in",
-   "buy": 1324,
-   "sell": 1437,
-   "send": 1320,
-   "marginal": 226
+   "buy": 1207,
+   "sell": 1311,
+   "send": 1196,
+   "marginal": 204
   },
   {
    "what": "creator-vest",
-   "buy": 1249,
-   "sell": 1251,
-   "send": 1245,
-   "marginal": 50
+   "buy": 1154,
+   "sell": 1149,
+   "send": 1143,
+   "marginal": 55
+  },
+  {
+   "what": "blocklist",
+   "buy": 1191,
+   "sell": 1193,
+   "send": 1222,
+   "marginal": 134
+  },
+  {
+   "what": "allowlist-phase",
+   "buy": 1196,
+   "sell": 1192,
+   "send": 1221,
+   "marginal": 133
+  },
+  {
+   "what": "seasoned-sells",
+   "buy": 1851,
+   "sell": 2036,
+   "send": 2595,
+   "marginal": 1507
+  },
+  {
+   "what": "outflow-cap",
+   "buy": 1152,
+   "sell": 1277,
+   "send": 1141,
+   "marginal": 170
+  },
+  {
+   "what": "token-gate",
+   "buy": 1212,
+   "sell": 1174,
+   "send": 1201,
+   "marginal": 113
+  },
+  {
+   "what": "chapters",
+   "buy": 1638,
+   "sell": 1203,
+   "send": 1197,
+   "marginal": 526
   },
   {
    "what": "custom:empty",
-   "buy": 3693,
-   "sell": 3742,
-   "send": 5090,
-   "marginal": 3895
+   "buy": 3324,
+   "sell": 3370,
+   "send": 4480,
+   "marginal": 3392
   },
   {
    "what": "custom:feegate",
-   "buy": 6492,
-   "sell": 6048,
-   "send": 7396,
-   "marginal": 6201
+   "buy": 6122,
+   "sell": 5675,
+   "send": 6785,
+   "marginal": 5697
   },
   {
    "what": "custom:koth",
-   "buy": 6000,
-   "sell": 5578,
-   "send": 6595,
-   "marginal": 5400
+   "buy": 5631,
+   "sell": 5206,
+   "send": 5985,
+   "marginal": 4897
   },
   {
    "what": "custom:heavy",
-   "buy": 10060,
-   "sell": 10216,
-   "send": 11975,
-   "marginal": 10780
+   "buy": 9646,
+   "sell": 9810,
+   "send": 11300,
+   "marginal": 10212
   },
   {
    "what": "trading-hours",
-   "buy": 1209,
-   "sell": 1211,
-   "send": 1195,
+   "buy": 1112,
+   "sell": 1107,
+   "send": 1088,
    "marginal": 0
   }
  ],
  "worst": [
   {
    "what": "hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + rising-max",
-   "buy": 4483,
-   "buyTx": 26102,
-   "sell": 4504,
-   "sellTx": 32123,
-   "send": 4466,
-   "sendTx": 29086
+   "buy": 4035,
+   "buyTx": 25654,
+   "sell": 4039,
+   "sellTx": 30158,
+   "send": 3776,
+   "sendTx": 34396
   },
   {
    "what": "hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + anti-bundle + snipe-shield",
-   "buy": 4244,
-   "buyTx": 33363,
-   "sell": 4408,
-   "sellTx": 33527,
-   "send": 4180,
-   "sendTx": 27300
+   "buy": 3786,
+   "buyTx": 34405,
+   "sell": 3936,
+   "sellTx": 28555,
+   "send": 3501,
+   "sendTx": 25121
   },
   {
    "what": "hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + custom:koth",
-   "buy": 7876,
-   "buyTx": 38592,
-   "sell": 7722,
-   "sellTx": 33938,
-   "send": 7477,
-   "sendTx": 32194
+   "buy": 7428,
+   "buyTx": 30644,
+   "sell": 7232,
+   "sellTx": 40948,
+   "send": 6778,
+   "sendTx": 32995
   },
   {
    "what": "hold-timer + circuit-breaker + sandwich-guard + sell-cooldown + lock-in + custom:heavy",
-   "buy": 12247,
-   "buyTx": 39963,
-   "sell": 12671,
-   "sellTx": 41887,
-   "send": 13168,
-   "sendTx": 49885
+   "buy": 11709,
+   "buyTx": 33425,
+   "sell": 12102,
+   "sellTx": 39818,
+   "send": 12359,
+   "sendTx": 44576
   },
   {
    "what": "hold-timer + circuit-breaker + anti-bundle + rising-max + creator-vest + custom:heavy",
-   "buy": 12590,
-   "buyTx": 41806,
-   "sell": 12509,
-   "sellTx": 44725,
-   "send": 13481,
-   "sendTx": 44198
+   "buy": 12023,
+   "buyTx": 41239,
+   "sell": 11967,
+   "sellTx": 44183,
+   "send": 12655,
+   "sendTx": 43372
+  },
+  {
+   "what": "hold-timer + circuit-breaker + sandwich-guard + token-gate + blocklist + seasoned-sells",
+   "buy": 3957,
+   "buyTx": 44590,
+   "sell": 4213,
+   "sellTx": 49346,
+   "send": 3739,
+   "sendTx": 51873
+  },
+  {
+   "what": "hold-timer + circuit-breaker + token-gate + blocklist + seasoned-sells + custom:heavy",
+   "buy": 11913,
+   "buyTx": 56141,
+   "sell": 12260,
+   "sellTx": 68488,
+   "send": 12605,
+   "sendTx": 67334
+  },
+  {
+   "what": "hold-timer + circuit-breaker + anti-bundle + token-gate + outflow-cap + custom:heavy",
+   "buy": 11854,
+   "buyTx": 44489,
+   "sell": 12175,
+   "sellTx": 52310,
+   "send": 12485,
+   "sendTx": 51121
+  },
+  {
+   "what": "hold-timer + circuit-breaker + allowlist-phase + chapters + creator-vest + custom:heavy",
+   "buy": 12245,
+   "buyTx": 52389,
+   "sell": 12059,
+   "sellTx": 46203,
+   "send": 12501,
+   "sendTx": 45146
+  },
+  {
+   "what": "token-gate + allowlist-phase + outflow-cap + circuit-breaker + hold-timer + custom:heavy",
+   "buy": 11924,
+   "buyTx": 56152,
+   "sell": 12265,
+   "sellTx": 66993,
+   "send": 12610,
+   "sendTx": 59839
   }
  ],
  "examples": [
   {
    "stack": "hot-potato",
    "label": "buy: catches the potato",
-   "engine": 7880,
+   "engine": 7509,
    "verdict": "ok"
   },
   {
    "stack": "hot-potato",
    "label": "send: passes the potato",
-   "engine": 10607,
+   "engine": 9994,
    "verdict": "ok"
   },
   {
    "stack": "hot-potato",
    "label": "buy: burns the holder and catches",
-   "engine": 10337,
+   "engine": 9966,
    "verdict": "ok"
   },
   {
    "stack": "hot-potato",
    "label": "buy refused: burnt wallet (reason with a duration)",
-   "engine": 8156,
+   "engine": 8595,
    "verdict": 6128
   },
   {
    "stack": "hot-potato",
    "label": "sell refused: holding the potato",
-   "engine": 8856,
+   "engine": 9758,
    "verdict": 6128
   },
   {
    "stack": "5 heavy blocks + hot-potato",
    "label": "buy: catches the potato",
-   "engine": 9744,
+   "engine": 9295,
    "verdict": "ok"
   },
   {
    "stack": "5 heavy blocks + hot-potato",
    "label": "send: passes the potato",
-   "engine": 11467,
+   "engine": 10769,
    "verdict": "ok"
   },
   {
    "stack": "5 heavy blocks + hot-potato",
    "label": "buy: burns the holder and catches",
-   "engine": 12231,
+   "engine": 11782,
    "verdict": "ok"
   },
   {
    "stack": "5 heavy blocks + hot-potato",
    "label": "buy refused: burnt wallet (reason with a duration)",
-   "engine": 9903,
+   "engine": 10256,
    "verdict": 6128
   },
   {
    "stack": "5 heavy blocks + hot-potato",
    "label": "sell refused: holding the potato",
-   "engine": 10803,
+   "engine": 11587,
    "verdict": 6128
   },
   {
    "stack": "koth-example",
    "label": "buy: takes the crown",
-   "engine": 9010,
+   "engine": 8639,
    "verdict": "ok"
   },
   {
    "stack": "koth-example",
    "label": "buy: outbids the faded bar",
-   "engine": 9137,
+   "engine": 8766,
    "verdict": "ok"
   },
   {
    "stack": "koth-example",
    "label": "send refused: the king (reason with a duration)",
-   "engine": 8234,
+   "engine": 8840,
    "verdict": 6128
   },
   {
    "stack": "koth-example",
    "label": "sell: not the king",
-   "engine": 5541,
+   "engine": 5169,
    "verdict": "ok"
   },
   {
    "stack": "5 heavy blocks + koth-example",
    "label": "buy: takes the crown",
-   "engine": 10874,
+   "engine": 10425,
    "verdict": "ok"
   },
   {
    "stack": "5 heavy blocks + koth-example",
    "label": "buy: outbids the faded bar",
-   "engine": 10989,
+   "engine": 10550,
    "verdict": "ok"
   },
   {
    "stack": "5 heavy blocks + koth-example",
    "label": "send refused: the king (reason with a duration)",
-   "engine": 8950,
+   "engine": 9454,
    "verdict": 6128
   },
   {
    "stack": "5 heavy blocks + koth-example",
    "label": "sell: not the king",
-   "engine": 7627,
+   "engine": 7148,
    "verdict": "ok"
   }
  ],
- "max": 13481
+ "max": 12655
 }

@@ -105,20 +105,20 @@ export const BLOCKS = [
   {
     id: 'blocklist', code: 0x1776, family: 'guard', name: 'Blocklist', enforcedBy: 'hook', state: 'global', route: 'any', cu: 1400, accts: 2, power: true,
     tagline: 'Named addresses can\'t receive the coin.',
-    refuses: 'A transfer to or from an owner with a block marker (PDA ["block", mint, owner]). The creator adds markers; they freeze at graduation.',
+    refuses: 'A transfer to or from an owner the creator marked (PDA ["mark", mint, owner]): no buys, sells, sends or receives. The creator edits the list until it freezes: at launch, 24h after launch, or at graduation, when the hook is retired.',
     params: [{ key: 'lockAt', label: 'List freezes', options: ['at graduation', 'after 24h', 'immediately'], def: 'at graduation' }],
     summary: (p) => `freezes ${p.lockAt}`,
     error: () => 'This address is on the coin\'s blocklist',
     check: (c) => c.blocked,
   },
   {
-    id: 'allowlist-phase', code: 0x1777, family: 'guard', name: 'Allowlist Phase', enforcedBy: 'hook', state: 'wallet', route: 'record', cu: 1600, accts: 1,
+    id: 'allowlist-phase', code: 0x1777, family: 'guard', name: 'Allowlist Phase', enforcedBy: 'hook', state: 'global', route: 'any', cu: 1600, accts: 2,
     tagline: 'For the first stretch, only pass holders can buy.',
-    refuses: 'A buy from a wallet without a pass while the allowlist phase is open. Passes are claimed from a Merkle root with one signature.',
+    refuses: 'A buy from a wallet without a pass while the allowlist phase is open. The creator grants passes to wallet addresses (PDA ["mark", mint, owner]), at launch or any time after. The creator\'s buy inside the launch transaction is exempt.',
     params: [{ key: 'minutes', label: 'Allowlist phase', min: 5, max: 1440, step: 5, def: 30, fmt: mins }],
     summary: (p) => `${mins(p.minutes)} phase`,
     error: (p) => `Allowlist phase: only pass holders can buy for the first ${mins(p.minutes)}`,
-    check: (c, p) => c.kind === 'buy' && c.t < p.minutes * 60 && !c.hasPass,
+    check: (c, p) => c.kind === 'buy' && !c.isCreator && c.t < p.minutes * 60 && !c.hasPass,
   },
 
   // ───────────── PACE ─────────────
@@ -176,7 +176,7 @@ export const BLOCKS = [
   {
     id: 'seasoned-sells', code: 0x177d, family: 'pace', name: 'Seasoned Sells', enforcedBy: 'hook', state: 'wallet', route: 'record', cu: 2600, accts: 2,
     tagline: 'The longer you hold, the more you can sell at once.',
-    refuses: 'A sell bigger than the wallet\'s seasoned share: a base share of its balance, plus a step for every hour since its first buy.',
+    refuses: 'A sell bigger than the wallet\'s seasoned share: a base share of its balance, plus a step for every full hour since its first coins arrived.',
     params: [
       { key: 'base', label: 'Day-one sell', min: 5, max: 50, step: 5, def: 20, fmt: (v) => `${v}% of balance` },
       { key: 'step', label: 'Added per hour', min: 5, max: 50, step: 5, def: 10, fmt: (v) => `+${v}%` },
@@ -208,7 +208,7 @@ export const BLOCKS = [
   {
     id: 'sniper-fee-burn', code: null, family: 'burn', name: 'Sniper Fee → Burn', enforcedBy: 'curve', state: 'none', route: 'any', cu: 0, accts: 0, also: 'crank',
     tagline: 'The first minute costs a lot, and the extra fee is burned.',
-    refuses: 'Nothing is refused. The DBC fee scheduler starts the trading fee high and decays it to 1%; the keeper uses everything above 1% to buy the coin back and burn it.',
+    refuses: 'Nothing is refused. The DBC fee scheduler starts the trading fee high and decays it to 1%; the keeper uses everything above 1% (after Meteora\'s 20% protocol cut) to buy the coin back and burn it. So that none of it reaches the creator, the creator\'s share of this coin\'s curve fees is routed through the keeper, which pays the creator its part of the normal 1% every round.',
     params: [
       { key: 'start', label: 'Starting fee', min: 5, max: 90, step: 5, def: 50, fmt: (v) => `${v}%` },
       { key: 'seconds', label: 'Decays over', min: 10, max: 600, step: 10, def: 60, fmt: (v) => `${v}s` },
@@ -219,7 +219,7 @@ export const BLOCKS = [
   {
     id: 'buyback-burn', code: null, family: 'burn', name: 'Buyback & Burn', enforcedBy: 'crank', state: 'none', route: 'any', cu: 0, accts: 0,
     tagline: 'Part of the creator\'s fees buys the coin and burns it.',
-    refuses: 'Nothing is refused. Every hour the keeper claims the creator fee share, swaps the chosen part for the coin and burns it. Each burn links to its transaction.',
+    refuses: 'Nothing is refused. Every hour the keeper claims the chosen share of creator fees, buys the coin with it and burns what it bought in the same transaction. Each burn links to its transaction. The keeper buys like anyone else: the coin\'s own caps and windows apply, and on a Hookscript coin the buys wait for graduation so they never play the game.',
     params: [{ key: 'pct', label: 'Share of creator fees', min: 10, max: 100, step: 5, def: 25, fmt: (v) => `${v}%` }],
     summary: (p) => `${p.pct}% of creator fees`,
   },
@@ -248,7 +248,7 @@ export const BLOCKS = [
   {
     id: 'holder-rewards', code: null, family: 'flow', name: 'Holder Rewards', enforcedBy: 'crank', state: 'none', route: 'any', cu: 0, accts: 0,
     tagline: 'Part of the fees goes back to the people holding.',
-    refuses: 'Nothing is refused. Hourly the keeper snapshots holders, posts a Merkle root and funds a claim vault with the chosen share of creator fees.',
+    refuses: 'Nothing is refused. Hourly the keeper reads every holder on chain and pays the chosen share of creator fees, pro rata by balance, to each wallet holding at least the minimum. The creator is left out. Every payout is its own transaction.',
     params: [
       { key: 'pct', label: 'Share of creator fees', min: 10, max: 100, step: 5, def: 40, fmt: (v) => `${v}%` },
       { key: 'min', label: 'Minimum hold', min: 0, max: 0.5, step: 0.01, def: 0.01, fmt: (v) => `${pct(v)} of supply` },
@@ -258,7 +258,7 @@ export const BLOCKS = [
   {
     id: 'first-buyer-rebate', code: null, family: 'flow', name: 'First-Buyer Rebate', enforcedBy: 'crank', state: 'none', route: 'any', cu: 0, accts: 0,
     tagline: 'The first wallets in get fees back.',
-    refuses: 'Nothing is refused. The first N distinct buyers that still hold at graduation split the chosen share of creator fees.',
+    refuses: 'Nothing is refused. The share builds up on the curve; at graduation the first N distinct buyers (creator excluded) that still hold are fixed, and from then on they split it equally, every round.',
     params: [
       { key: 'n', label: 'First buyers', min: 10, max: 500, step: 10, def: 100, fmt: (v) => `${v}` },
       { key: 'pct', label: 'Share of creator fees', min: 5, max: 50, step: 5, def: 20, fmt: (v) => `${v}%` },
@@ -282,9 +282,9 @@ export const BLOCKS = [
 
   // ───────────── CROWN ─────────────
   {
-    id: 'token-gate', code: 0x1781, family: 'crown', name: 'Token Gate', enforcedBy: 'hook', state: 'none', route: 'any', cu: 2300, accts: 2,
+    id: 'token-gate', code: 0x1781, family: 'crown', name: 'Token Gate', enforcedBy: 'hook', state: 'none', route: 'any', cu: 2300, accts: 4,
     tagline: 'Only holders of another token can get in.',
-    refuses: 'A buy or receive by a wallet holding less than the minimum of the gate token. The gate balance is read from the receiver\'s associated token account.',
+    refuses: 'A buy or receive by a wallet holding less than the minimum of the gate token. The gate balance is read from the receiver\'s associated token account of the gate mint.',
     params: [
       { key: 'ticker', label: 'Gate token', options: ['$BONK', '$WIF', '$JUP', '$HOOKRZ'], def: '$BONK' },
       { key: 'min', label: 'Minimum held', min: 1, max: 1000000, step: 1, def: 100000, fmt: (v) => `${(+v).toLocaleString('en-US')}` },
@@ -308,7 +308,7 @@ export const BLOCKS = [
   {
     id: 'diamond-tiers', code: null, family: 'crown', name: 'Diamond Tiers', enforcedBy: 'hook', state: 'wallet', route: 'record', cu: 1800, accts: 2, also: 'crank', recordsOnly: true,
     tagline: 'Wallets that never sell earn crowns, and crowns earn fees.',
-    refuses: 'Nothing is refused. The engine stamps each wallet record with its first buy and its first sell; the keeper pays the top tier from creator fees.',
+    refuses: 'Nothing is refused. Hourly the keeper pays the chosen share of creator fees, pro rata by balance, to every holder whose first coins arrived at least the set hours ago and who never sold. It reads the engine\'s Wallet records (first receipt, has-sold) when the coin keeps them, and the public trade history otherwise.',
     params: [
       { key: 'hours', label: 'Crown after', min: 1, max: 168, step: 1, def: 24, fmt: (v) => `${v}h unsold` },
       { key: 'pct', label: 'Share of creator fees', min: 5, max: 50, step: 5, def: 15, fmt: (v) => `${v}%` },
@@ -318,7 +318,7 @@ export const BLOCKS = [
   {
     id: 'kingmaker', code: null, family: 'crown', name: 'Kingmaker', enforcedBy: 'crank', state: 'none', route: 'any', cu: 0, accts: 0,
     tagline: 'The biggest holder at graduation wears the crown.',
-    refuses: 'Nothing is refused. At migration the keeper reads the top holder (curve vault excluded) and routes them the chosen share of creator fees for 30 days.',
+    refuses: 'Nothing is refused. The share builds up on the curve. At migration the keeper reads the top holder (pool vaults and the creator excluded) and pays them the chosen share of creator fees for 30 days, then it goes back to the creator.',
     params: [{ key: 'pct', label: 'Share of creator fees', min: 5, max: 50, step: 5, def: 10, fmt: (v) => `${v}%` }],
     summary: (p) => `${p.pct}% to the king`,
   },

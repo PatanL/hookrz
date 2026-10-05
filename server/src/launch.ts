@@ -8,12 +8,15 @@
 // Packed greedily into as few transactions as fit 1,232 bytes; 2+3 always share one.
 import { Keypair, PublicKey, Transaction, ComputeBudgetProgram, type TransactionInstruction } from "@solana/web3.js";
 import { NATIVE_MINT, TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
-import { deriveDbcPoolAddress, deriveDbcTokenVaultAddress, AccountsType } from "@meteora-ag/dynamic-bonding-curve-sdk";
+import { deriveDbcPoolAddress, deriveDbcTokenVaultAddress, deriveDbcPoolAuthority, AccountsType } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import BN from "bn.js";
 import { budget, normalize } from "../../web/src/engine/engine.js";
 import { curveConfig, INCINERATOR } from "./curve.js";
 import { sdk, ensure, AppError } from "./market.js";
 import type { HookProgram } from "./hook.js";
+import { hookSlots } from "./layout.js";
+import { resolveGate, withGateMin } from "./marks.js";
+import type { ScriptAbi } from "./fees.js";
 import type { Chain } from "./chain.js";
 
 export const TX_LIMIT = 1232;
@@ -30,8 +33,13 @@ export type LaunchInput = {
   parentStack?: PublicKey | null;
   parentAuthor?: PublicKey | null;
   script?: Uint8Array | null;
+  /** The script's compiler ABI: its `payout` declarations are keeper shares routed at launch (src/fees.ts). */
+  scriptAbi?: ScriptAbi;
   /** Reuse the throwaway mint/config keypairs of an earlier prepare (same launch, fresh blockhash). */
   keys?: { mint: Keypair; config: Keypair } | null;
+  /** Blocklist marks / Allowlist passes written in the init_stack transaction (the launch slot: a Blocklist that freezes
+   *  "immediately" can only be set here). The creator's launch buy needs no pass (Allowlist Phase exempts it). */
+  marks?: { owner: PublicKey; flags: number }[];
 };
 
 type Group = { label: string; ixs: TransactionInstruction[]; signers: Keypair[] };
@@ -45,14 +53,15 @@ export async function buildLaunch(chain: Chain, hook: HookProgram | null, a: Lau
   const { dbc } = sdk(chain);
   const b = budget(a.stack);
   ensure(b.ok, b.warnings.find((w: any) => w.level === "error")?.text ?? "Invalid stack", "STACK_INVALID");
-  const hooked = b.hasHook;
+  // A hook only when the engine runs a slot: Diamond Tiers is read by the keeper, not run by the engine.
+  const hooked = hookSlots(a.stack).length > 0;
   ensure(!hooked || hook, "The hook engine is not available on this network", "ENGINE_UNAVAILABLE");
   const config = a.keys?.config ?? Keypair.generate(), mint = a.keys?.mint ?? Keypair.generate();
   const uri = typeof a.uri === "function" ? a.uri(mint.publicKey.toBase58()) : a.uri;
   ensure(a.name.length >= 1 && a.name.length <= 32 && a.symbol.length >= 1 && a.symbol.length <= 10 && uri.length <= 200, "Name ≤ 32, ticker ≤ 10, uri ≤ 200 characters");
   const pool = deriveDbcPoolAddress(NATIVE_MINT, mint.publicKey, config.publicKey);
   const baseVault = deriveDbcTokenVaultAddress(pool, mint.publicKey);
-  const { params, features } = curveConfig(a.stack, { thresholdSol: a.thresholdSol });
+  const { params, features } = curveConfig(a.stack, { thresholdSol: a.thresholdSol, scriptAbi: a.scriptAbi });
   const common = {
     ...params,
     config: config.publicKey,
@@ -74,7 +83,12 @@ export async function buildLaunch(chain: Chain, hook: HookProgram | null, a: Lau
   const { accounts: [cfgAcc, poolAcc, stackAcc] } = await chain.read([config.publicKey, pool, hooked ? hook!.stackPda(mint.publicKey) : pool]);
   ensure(!(hooked && stackAcc && poolAcc), "This launch already landed", "ALREADY_LAUNCHED");
   if (!cfgAcc) groups.push({ label: "DBC createConfig" + (hooked ? "WithTransferHook" : ""), ixs: ixs.slice(0, cut), signers: [config] });
-  const initArgs = { creator: a.creator, mint: mint.publicKey, pool, config: config.publicKey, baseVault, stack: a.stack, parentStack: a.parentStack, parentAuthor: a.parentAuthor, script: a.script };
+  // Token Gate: the ticker's mint on this network (refuses $HOOKRZ and mints that aren't here); init_stack packs the raw minimum.
+  const gate = hooked ? await resolveGate(chain, a.stack) : null;
+  const initArgs = { creator: a.creator, mint: mint.publicKey, pool, config: config.publicKey, baseVault, stack: withGateMin(a.stack, gate), parentStack: a.parentStack, parentAuthor: a.parentAuthor, script: a.script, gateMint: gate?.mint ?? null };
+  const marks = a.marks ?? [];
+  ensure(!marks.length || (hooked && hook!.setMarkIx), "Marks need the hookrz engine", "ENGINE_UNAVAILABLE");
+  const markIxs = marks.map((m) => hook!.setMarkIx!(a.creator, mint.publicKey, m.owner, m.flags));
   const poolIxs = ixs.slice(cut);
 
   // The creator buy (optional), built from the config alone (the pool isn't on chain yet).
@@ -85,7 +99,7 @@ export async function buildLaunch(chain: Chain, hook: HookProgram | null, a: Lau
     const pre: TransactionInstruction[] = [];
     let extra: any = {};
     if (hooked) {
-      const extras = hook!.expectedExtras(mint.publicKey, pool, baseVault, ata, a.stack, a.script);
+      const extras = hook!.expectedExtras(mint.publicKey, pool, baseVault, ata, a.stack, a.script, { sourceOwner: deriveDbcPoolAuthority(), destinationOwner: a.creator, gate });
       ensure(extras, "This hook program cannot resolve accounts before launch; buy after the launch lands", "NO_FIRST_BUY");
       extra = { transferHookAccountsInfo: { slices: [{ accountsType: AccountsType.TransferHookBase, length: extras.length }] }, transferHookAccounts: extras };
       if (hook!.needsWalletRecord(a.stack)) pre.push(hook!.openWalletIx(a.creator, mint.publicKey, ata)!);
@@ -109,14 +123,15 @@ export async function buildLaunch(chain: Chain, hook: HookProgram | null, a: Lau
     // init_stack and the creator buy go in ONE transaction, so the buy lands in the launch slot (Snipe Shield and
     // Anti-Bundle exempt it there). Splitting pool and init_stack is safe: until init_stack writes the Stack and the
     // ExtraAccountMetaList every transfer of the mint fails, and only the pool creator can init (or stage a script).
-    const inline = hook!.initIxs(initArgs);
-    if (fits([...inline, ...buyIxs])) groups.push({ label: "hookrz_engine init_stack" + (buyIxs.length ? ` + ${buyLabel}` : ""), ixs: [...inline, ...buyIxs], signers: [] });
+    const inline = [...hook!.initIxs(initArgs), ...markIxs];
+    const marksLabel = markIxs.length ? ` + set_mark × ${markIxs.length}` : "";
+    if (fits([...inline, ...buyIxs])) groups.push({ label: "hookrz_engine init_stack" + marksLabel + (buyIxs.length ? ` + ${buyLabel}` : ""), ixs: [...inline, ...buyIxs], signers: [] });
     else {
       // A long Hookscript: stage it with write_script chunks, then seal it with init_stack (staged).
-      ensure(a.script && hook!.writeScriptIxs, "init_stack does not fit one transaction", "TX_TOO_LARGE");
+      ensure(a.script && hook!.writeScriptIxs, markIxs.length ? `init_stack, ${markIxs.length} launch mark(s) and the creator buy don't fit one transaction: launch with fewer marks and add the rest after launch (a Blocklist that freezes "immediately" can only be written at launch)` : "init_stack does not fit one transaction", "TX_TOO_LARGE");
       for (const w of hook!.writeScriptIxs(a.creator, mint.publicKey, pool, a.script!, 700)) groups.push({ label: "hookrz_engine write_script", ixs: [w], signers: [] });
-      const sealed = hook!.initIxs({ ...initArgs, staged: true });
-      if (fits([...sealed, ...buyIxs])) groups.push({ label: "hookrz_engine init_stack (seals the staged script)" + (buyIxs.length ? ` + ${buyLabel}` : ""), ixs: [...sealed, ...buyIxs], signers: [] });
+      const sealed = [...hook!.initIxs({ ...initArgs, staged: true }), ...markIxs];
+      if (fits([...sealed, ...buyIxs])) groups.push({ label: "hookrz_engine init_stack (seals the staged script)" + marksLabel + (buyIxs.length ? ` + ${buyLabel}` : ""), ixs: [...sealed, ...buyIxs], signers: [] });
       else {
         groups.push({ label: "hookrz_engine init_stack (seals the staged script)", ixs: sealed, signers: [] });
         if (buyIxs.length) groups.push({ label: `${buyLabel} (own transaction: not exempt from Snipe Shield / Anti-Bundle)`, ixs: buyIxs, signers: [] });

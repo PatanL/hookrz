@@ -10,6 +10,9 @@ import { BLOCK_IDS } from "../src/layout.js";
 import { RUNTIME } from "../src/env.js";
 import type { ForkChain } from "../src/fork.js";
 import type { TxRecord } from "../src/chain.js";
+import { PublicKey } from "@solana/web3.js";
+import { forkFundGate, gateMints } from "../src/marks.js";
+import { HookrzEngine } from "../src/hook.js";
 
 let svc: Hookrz, chain: ForkChain;
 const rows: any[] = [];
@@ -42,6 +45,15 @@ async function measure(label: string, stack: any[]) {
   const ticker = `CU${rows.length}`;
   const prep = await svc.prepareLaunch({ meta: { name: label.slice(0, 32), ticker }, stack, creator: creator.publicKey.toBase58() });
   await svc.submitLaunch({ mint: prep.mint, signed: prep.transactions.map((t: any) => signB64(t.base64, creator)) });
+  // The landing path for the gated blocks: a pass for the buyer (Allowlist Phase), BONK in its ATA (Token Gate).
+  const ids = stack.map((x: any) => x.id);
+  if (ids.includes("allowlist-phase")) {
+    const ix = (svc.hook as HookrzEngine).setMarkIx(creator.publicKey, new PublicKey(prep.mint), buyer.publicKey, 2);
+    const tx = new (await import("@solana/web3.js")).Transaction({ feePayer: creator.publicKey, recentBlockhash: (await chain.blockhash()).blockhash }).add(ix);
+    tx.sign(creator);
+    assert.ok((await svc.sendTx(tx.serialize().toString("base64"))).ok, "pass");
+  }
+  if (ids.includes("token-gate")) forkFundGate(chain, new PublicKey(gateMints()["$BONK"]), buyer.publicKey, 10n ** 12n);
   chain.warp(700); // past every launch window
   const send = async (side: "buy" | "sell", amount: number) => {
     const p = await svc.prepareTrade({ ticker, side, amount, wallet: buyer.publicKey.toBase58(), minOut: "1" });

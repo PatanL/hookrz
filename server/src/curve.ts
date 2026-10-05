@@ -4,19 +4,22 @@
 //   lp-lock         → creator's permanently locked share of the DAMM v2 position (else the 10% DBC minimum)
 //   leftover-burn   → leftover receiver = the incinerator
 //   locked-metadata → token update authority: none (Immutable)
+// Keeper rules route their share of the creator's fees through the partner side (src/fees.ts):
+//   creatorTradingFeePercentage = 50 − ceil(Σshares/2), or 0 with Sniper Fee → Burn; partner locked LP = ceil(Σshares)%.
 import { PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 import { getNextSqrtPriceFromInput, getDeltaAmountBaseUnsigned, Rounding, buildCurve, TokenType, TokenAuthorityOption, BaseFeeMode, CollectFeeMode, MigrationOption, MigrationFeeOption, ActivationType } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { normalize } from "../../web/src/engine/engine.js";
+import { feeRouting, CREATOR_POINTS, type ScriptAbi } from "./fees.js";
 
 export const SUPPLY = 1_000_000_000; // whole tokens
 export const BASE_DECIMALS = 6;
 export const QUOTE_DECIMALS = 9;
 export const INCINERATOR = new PublicKey("1nc1nerator11111111111111111111111111111111");
-/** Share of the creator half of the 1% fee split (FEES in web/src/api/contract.js: creator 50 / hookrz 40 / author 10). */
-export const CREATOR_FEE_PCT = 50;
+/** Creator's share of the post-protocol trading fee for a coin without keeper rules (FEES: creator 50 / hookrz 50). */
+export const CREATOR_FEE_PCT = CREATOR_POINTS;
 
-export type CurveOptions = { thresholdSol?: number; percentageSupplyOnMigration?: number };
+export type CurveOptions = { thresholdSol?: number; percentageSupplyOnMigration?: number; scriptAbi?: ScriptAbi };
 
 export function curveFeatures(stackIn: any[]) {
   const stack = normalize(stackIn) as { id: string; params: any }[];
@@ -33,7 +36,10 @@ export function curveFeatures(stackIn: any[]) {
 
 /** DBC ConfigParameters for one coin. */
 export function curveConfig(stack: any[], opts: CurveOptions = {}) {
-  const f = curveFeatures(stack);
+  const f0 = curveFeatures(stack);
+  const routing = feeRouting(stack, opts.scriptAbi);
+  const lp = lpSplit(f0.lockedLpPct, routing.partnerLockedLpPct);
+  const f = { ...f0, feeSplit: { creatorTradingFeePercentage: routing.creatorTradingFeePercentage, partnerLockedLpPct: lp.partnerLocked, creatorLockedLpPct: lp.creatorLocked, creatorLpPct: lp.creatorUnlocked, keeperShareBps: routing.shareBps } };
   // Linear scheduler: one period per second (at most 600), fee falls by an equal step each period.
   const periods = f.feeScheduler ? Math.min(600, f.feeScheduler.seconds) : 0;
   return {
@@ -56,16 +62,16 @@ export function curveConfig(stack: any[], opts: CurveOptions = {}) {
         },
         dynamicFeeEnabled: false,
         collectFeeMode: CollectFeeMode.QuoteToken,
-        creatorTradingFeePercentage: CREATOR_FEE_PCT,
+        creatorTradingFeePercentage: routing.creatorTradingFeePercentage,
         poolCreationFee: 0,
         enableFirstSwapWithMinFee: false,
       },
       migration: { migrationOption: MigrationOption.MET_DAMM_V2, migrationFeeOption: MigrationFeeOption.FixedBps25, migrationFee: { feePercentage: 0, creatorFeePercentage: 0 } },
       liquidityDistribution: {
-        partnerPermanentLockedLiquidityPercentage: 0,
+        partnerPermanentLockedLiquidityPercentage: lp.partnerLocked,
         partnerLiquidityPercentage: 0,
-        creatorPermanentLockedLiquidityPercentage: f.lockedLpPct,
-        creatorLiquidityPercentage: 100 - f.lockedLpPct,
+        creatorPermanentLockedLiquidityPercentage: lp.creatorLocked,
+        creatorLiquidityPercentage: lp.creatorUnlocked,
       },
       lockedVesting: { totalLockedVestingAmount: 0, numberOfVestingPeriod: 0, cliffUnlockAmount: 0, totalVestingDuration: 0, cliffDurationFromMigrationTime: 0 },
       activationType: ActivationType.Timestamp,
@@ -73,6 +79,14 @@ export function curveConfig(stack: any[], opts: CurveOptions = {}) {
       migrationQuoteThreshold: opts.thresholdSol ?? 85,
     } as any),
   };
+}
+
+/** LP after migration: the keeper's routed share is a permanently locked partner position taken from the creator's share;
+ *  the total locked never drops below the coin's LP Lock (or the DBC minimum of 10%). */
+export function lpSplit(lockedLpPct: number, partnerLocked: number) {
+  const partner = Math.max(0, Math.min(100, partnerLocked));
+  const creatorLocked = Math.max(0, Math.min(100 - partner, lockedLpPct - partner));
+  return { partnerLocked: partner, creatorLocked, creatorUnlocked: 100 - partner - creatorLocked };
 }
 
 /** Tokens (raw) the creator's first buy gets at launch, on the curve's first segment, after the t=0 fee. */

@@ -3,7 +3,7 @@
 //   AwayRules    — the proven away-rules program, a stand-in used only until hookrz_engine is built,
 //                  to exercise the DBC TransferHook launch → trade → graduate → close path end to end.
 import { PublicKey, SystemProgram, TransactionInstruction, type AccountMeta } from "@solana/web3.js";
-import { TOKEN_2022_PROGRAM_ID, createTransferCheckedWithTransferHookInstruction, getTransferHook, unpackMint } from "@solana/spl-token";
+import { TOKEN_2022_PROGRAM_ID, createTransferCheckedWithTransferHookInstruction, getAssociatedTokenAddressSync, getTransferHook, unpackMint } from "@solana/spl-token";
 import { sdkConnection } from "./sdk-connection.js";
 import type { Chain } from "./chain.js";
 import * as L from "./layout.js";
@@ -20,7 +20,11 @@ export type InitArgs = {
   script?: Uint8Array | null;
   /** The script was already written with write_script chunks. */
   staged?: boolean;
+  /** Token Gate: the gate mint (passed to init_stack after the parent). */
+  gateMint?: PublicKey | null;
 };
+/** Owners and the Token Gate for an offline extra-account list (marks and the gate ATA derive from the owners). */
+export type ExtrasContext = { sourceOwner?: PublicKey; destinationOwner?: PublicKey; gate?: { mint: PublicKey; tokenProgram: PublicKey } | null };
 export type WalletView = L.WalletRecord & { address: string; lamports: number };
 export type StackView = L.StackAccount & { address: string };
 
@@ -36,7 +40,9 @@ export interface HookProgram {
   closeStackIx(mint: PublicKey, creator: PublicKey): TransactionInstruction | null;
   /** The hook's extra accounts for a transfer, computed offline (used before the meta list exists:
    *  the creator's first buy in the launch transaction). Order: [extras…, program, meta list]. */
-  expectedExtras(mint: PublicKey, pool: PublicKey, source: PublicKey, destination: PublicKey, stack: any[], script?: Uint8Array | null): AccountMeta[] | null;
+  expectedExtras(mint: PublicKey, pool: PublicKey, source: PublicKey, destination: PublicKey, stack: any[], script?: Uint8Array | null, x?: ExtrasContext): AccountMeta[] | null;
+  /** set_mark: the creator sets an owner's Blocklist / Allowlist mark (hookrz_engine only). */
+  setMarkIx?(creator: PublicKey, mint: PublicKey, owner: PublicKey, flags: number): TransactionInstruction;
   /** write_script chunks for a script too big for the launch transaction (null: not supported). */
   writeScriptIxs?(creator: PublicKey, mint: PublicKey, pool: PublicKey, script: Uint8Array, chunk: number): TransactionInstruction[];
   /** Whether buyers need a Wallet record before they can receive (any hook block with wallet state). */
@@ -54,13 +60,14 @@ export class HookrzEngine implements HookProgram {
   stackPda = (mint: PublicKey) => pda([Buffer.from("stack"), mint.toBuffer()], this.id);
   scriptPda = (mint: PublicKey) => pda([Buffer.from("script"), mint.toBuffer()], this.id);
   walletPda = (mint: PublicKey, ta: PublicKey) => pda([Buffer.from("w"), mint.toBuffer(), ta.toBuffer()], this.id);
+  markPda = (mint: PublicKey, owner: PublicKey) => pda([Buffer.from("mark"), mint.toBuffer(), owner.toBuffer()], this.id);
 
   initIxs(a: InitArgs) {
     const data = L.encodeInitStack({ stack: a.stack, script: a.script ?? null, parent: !!a.parentStack, staged: !!a.staged });
     const keys: AccountMeta[] = L.initStackAccounts({
       creator: a.creator, mint: a.mint, pool: a.pool, config: a.config,
       stack: this.stackPda(a.mint), metaList: this.metaList(a.mint), script: this.scriptPda(a.mint),
-      parentStack: a.parentStack ?? null, system: SystemProgram.programId,
+      parentStack: a.parentStack ?? null, system: SystemProgram.programId, gateMint: a.gateMint ?? null,
     });
     return [new TransactionInstruction({ programId: this.id, keys, data })];
   }
@@ -79,12 +86,49 @@ export class HookrzEngine implements HookProgram {
     for (let o = 0; o < script.length; o += chunk) out.push(new TransactionInstruction({ programId: this.id, keys, data: L.encodeWriteScript(script, o, Math.min(chunk, script.length - o)) }));
     return out;
   }
-  expectedExtras(mint: PublicKey, pool: PublicKey, source: PublicKey, destination: PublicKey, stack: any[], script?: Uint8Array | null) {
-    const keys = L.metaListEntries({ stack: this.stackPda(mint), pool, walletSrc: this.walletPda(mint, source), walletDst: this.walletPda(mint, destination), script: this.scriptPda(mint) }, stack, script);
+  setMarkIx(creator: PublicKey, mint: PublicKey, owner: PublicKey, flags: number) {
+    const keys = L.setMarkAccounts({ creator, mint, stack: this.stackPda(mint), mark: this.markPda(mint, owner), system: SystemProgram.programId });
+    return new TransactionInstruction({ programId: this.id, keys, data: L.encodeSetMark(flags, owner) });
+  }
+  /** The owner's mark flags (0 = none). */
+  async readMark(chain: Chain, mint: PublicKey, owner: PublicKey) {
+    const { accounts: [a] } = await chain.read([this.markPda(mint, owner)]);
+    return a && a.owner.equals(this.id) && a.data.length > 0 ? a.data[0] : 0;
+  }
+  expectedExtras(mint: PublicKey, pool: PublicKey, source: PublicKey, destination: PublicKey, stack: any[], script?: Uint8Array | null, x: ExtrasContext = {}) {
+    const marks = L.usesMarks(stack) && x.sourceOwner && x.destinationOwner ? { markSrc: this.markPda(mint, x.sourceOwner), markDst: this.markPda(mint, x.destinationOwner) } : {};
+    const gate = x.gate && x.destinationOwner ? { ...x.gate, ata: getAssociatedTokenAddressSync(x.gate.mint, x.destinationOwner, true, x.gate.tokenProgram) } : null;
+    const keys = L.metaListEntries({ stack: this.stackPda(mint), pool, walletSrc: this.walletPda(mint, source), walletDst: this.walletPda(mint, destination), script: this.scriptPda(mint), ...marks, gate }, stack, script);
     return [...keys, { pubkey: this.id, isSigner: false, isWritable: false }, { pubkey: this.metaList(mint), isSigner: false, isWritable: false }];
   }
   needsWalletRecord(stack: any[]) {
     return L.usesWalletRecords(stack);
+  }
+  /**
+   * The hook's extra accounts for one transfer, rebuilt from the Stack's flags exactly as init_stack wrote the meta list
+   * (order [extras…, program, meta list]). Needs no account data, so it works where the spl-token / DBC SDK resolvers
+   * can't: account-data seeds (marks, the gate ATA derive from the token accounts' owners) and a receiver whose token
+   * account doesn't exist yet. `onlyIfDataSeeds`: null unless the stack has marks or a Token Gate.
+   */
+  async extrasFromStack(chain: Chain, mint: PublicKey, source: PublicKey, destination: PublicKey, sourceOwner: PublicKey, destinationOwner: PublicKey, onlyIfDataSeeds = false): Promise<AccountMeta[] | null> {
+    const s = await this.readStack(chain, mint);
+    if (!s || (onlyIfDataSeeds && !(s.flags & (64 | 128)))) return null;
+    const f = s.flags;
+    const k = (pubkey: PublicKey, isWritable = false): AccountMeta => ({ pubkey, isSigner: false, isWritable });
+    const out = [k(this.stackPda(mint), !!(f & 16))];
+    if (f & 2) out.push(k(new PublicKey(s.pool)));
+    if (f & 4) out.push(k(this.walletPda(mint, source), true), k(this.walletPda(mint, destination), true));
+    if (f & 8) out.push(k(new PublicKey(s.script!), true));
+    if (f & 32) out.push(k(L.INSTRUCTIONS_SYSVAR));
+    if (f & 64) out.push(k(this.markPda(mint, sourceOwner)), k(this.markPda(mint, destinationOwner)));
+    if (f & 128) {
+      if (!s.gate) return null;
+      const gm = new PublicKey(s.gate.mint);
+      const { accounts: [acc] } = await chain.read([gm]);
+      if (!acc) return null;
+      out.push(k(gm), k(acc.owner), k(L.ATA_PROGRAM), k(getAssociatedTokenAddressSync(gm, destinationOwner, true, acc.owner)));
+    }
+    return [...out, k(this.id), k(this.metaList(mint))];
   }
   async readStack(chain: Chain, mint: PublicKey) {
     const key = this.stackPda(mint);

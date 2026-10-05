@@ -10,12 +10,13 @@ import * as spl from '@solana/spl-token';
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { initStackData, writeScriptData, SEEDS, IX } from '../js/layout.mjs';
+import { initStackData, writeScriptData, setMarkData, SEEDS, IX } from '../js/layout.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SNAP = process.env.FORK_PROGRAMS ?? '/home/dzliu/away-tek/.runtime/dbc-fork/programs';
 export const T22 = spl.TOKEN_2022_PROGRAM_ID;
 export const ATA = spl.ASSOCIATED_TOKEN_PROGRAM_ID;
+export const SPL = spl.TOKEN_PROGRAM_ID;
 // ENGINE_ID runs the suite with the same .so loaded at another address (the program uses the runtime program id).
 export const ENGINE = new PublicKey(process.env.ENGINE_ID ?? 'EiZ3npNmrPCkAjskdMR7RDJQcojC9p8CHNr1dR4DPxKr');
 export const DBC = new PublicKey('dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN');
@@ -29,6 +30,7 @@ export const stackPda = (mint) => pda(SEEDS.stack(mint.toBytes()));
 export const scriptPda = (mint) => pda(SEEDS.script(mint.toBytes()));
 export const metasPda = (mint) => pda(SEEDS.extraMetas(mint.toBytes()));
 export const walletPda = (mint, ta) => pda(SEEDS.wallet(mint.toBytes(), ta.toBytes()));
+export const markPda = (mint, owner) => pda(SEEDS.mark(mint.toBytes(), owner.toBytes()));
 
 export function soPath() {
   for (const p of [join(HERE, '../target/sbpf-solana-solana/release/hookrz_engine.so'), join(HERE, '../hookrz_engine.so')]) if (existsSync(p)) return p;
@@ -40,6 +42,7 @@ export class Fork {
     this.svm = new LiteSVM();
     this.svm.addProgram(address(T22.toBase58()), readFileSync(`${SNAP}/${T22.toBase58()}.so`));
     this.svm.addProgram(address(ATA.toBase58()), readFileSync(`${SNAP}/${ATA.toBase58()}.so`));
+    this.svm.addProgram(address(SPL.toBase58()), readFileSync(`${SNAP}/${SPL.toBase58()}.so`));
     this.svm.addProgram(address(ENGINE.toBase58()), readFileSync(soPath()));
     this.payer = this.funded();
     this.setTime(MONDAY + 15n * 3600n, 1_000n); // 07:00 UTC
@@ -73,6 +76,8 @@ export class Fork {
   setAccount(pk, owner, data, lam) {
     this.svm.setAccount({ address: address(pk.toBase58()), lamports: lamports(BigInt(lam ?? this.svm.minimumBalanceForRentExemption(BigInt(data.length)))), data, space: BigInt(data.length), programAddress: address(owner.toBase58()), executable: false });
   }
+  /** Replace the engine's code in place (as an upgrade does): accounts and the program address stay. */
+  loadEngine(path) { this.svm.addProgram(address(ENGINE.toBase58()), readFileSync(path)); this.svm.expireBlockhash(); }
   /** Send instructions; returns { ok, code, err, logs, cu (whole tx), engineCu (Execute / our instruction) }. */
   send(ixs, signers, { units = 1_400_000 } = {}) {
     const tx = new Transaction({ feePayer: signers[0].publicKey, recentBlockhash: this.svm.latestBlockhash() });
@@ -148,7 +153,7 @@ export class Fork {
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ], data: Buffer.from(writeScriptData(script, offset, length)) });
   }
-  initStackIx(c, slots, { signer = c.creator.publicKey, script = null, parent = null, staged = false } = {}) {
+  initStackIx(c, slots, { signer = c.creator.publicKey, script = null, parent = null, staged = false, gate = null } = {}) {
     const keys = [
       { pubkey: signer, isSigner: true, isWritable: true },
       { pubkey: c.mint, isSigner: false, isWritable: false },
@@ -160,9 +165,39 @@ export class Fork {
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ];
     if (parent) keys.push({ pubkey: parent, isSigner: false, isWritable: false });
+    if (gate) keys.push({ pubkey: gate, isSigner: false, isWritable: false });
     return new TransactionInstruction({ programId: ENGINE, keys, data: Buffer.from(initStackData(slots, { script, parent: !!parent, staged })) });
   }
   initStack(c, slots, opts) { return this.send([this.initStackIx(c, slots, opts)], [c.creator]); }
+  /** set_mark: the creator sets `owner`'s mark (1 blocked, 2 pass). */
+  setMarkIx(c, owner, flags, signer = c.creator.publicKey) {
+    return new TransactionInstruction({ programId: ENGINE, keys: [
+      { pubkey: signer, isSigner: true, isWritable: true },
+      { pubkey: c.mint, isSigner: false, isWritable: false },
+      { pubkey: stackPda(c.mint), isSigner: false, isWritable: false },
+      { pubkey: markPda(c.mint, owner), isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ], data: Buffer.from(setMarkData(flags, owner.toBytes())) });
+  }
+  setMark(c, owner, flags, signer = c.creator) { return this.send([this.setMarkIx(c, owner, flags, signer.publicKey)], [signer]); }
+  /** Another token's mint (SPL Token by default), as a Token Gate names; `fund(owner, raw)` puts gate tokens in the owner's ATA. */
+  gateMint({ decimals = 5, program = SPL } = {}) {
+    const mint = Keypair.generate();
+    const space = program.equals(SPL) ? spl.MINT_SIZE : spl.getMintLen([]);
+    this.must([
+      SystemProgram.createAccount({ fromPubkey: this.payer.publicKey, newAccountPubkey: mint.publicKey, space, lamports: Number(this.svm.minimumBalanceForRentExemption(BigInt(space))), programId: program }),
+      spl.createInitializeMintInstruction(mint.publicKey, decimals, this.payer.publicKey, null, program),
+    ], [this.payer, mint]);
+    const fund = (owner, amount) => {
+      const ata = spl.getAssociatedTokenAddressSync(mint.publicKey, owner, true, program);
+      this.must([
+        spl.createAssociatedTokenAccountIdempotentInstruction(this.payer.publicKey, ata, owner, mint.publicKey, program),
+        spl.createMintToInstruction(mint.publicKey, ata, this.payer.publicKey, BigInt(amount), [], program),
+      ], [this.payer]);
+      return ata;
+    };
+    return { mint: mint.publicKey, program, fund };
+  }
   /** A holder: a keypair with an ATA for the coin (ImmutableOwner) and, optionally, a wallet record. */
   holder(c, { record = true, owner = null } = {}) {
     const k = owner ?? this.funded(5n);

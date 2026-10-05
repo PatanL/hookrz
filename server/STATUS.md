@@ -1,6 +1,6 @@
 # hookrz server: status
 
-Owner: BACKEND agent. Spec: `../ENGINE-SPEC.md`. Updated 2026-10-04.
+Owner: BACKEND agent (keeper phase 2: KEEPER). Spec: `../ENGINE-SPEC.md`. Updated 2026-10-04.
 
 ## What works
 
@@ -42,8 +42,9 @@ The quote token is native SOL.
   - locked-metadata → TokenAuthorityOption.Immutable.
 - Fees are collected in the quote token (`CollectFeeMode.QuoteToken`), so no base-token fee claim ever leaves the vault
   as a "buy".
-- Fee split: `creatorTradingFeePercentage` is 50. The platform, as partner and fee claimer, gets the other 50; the
-  keeper pays the 10% author royalty out of that.
+- Fee split: creator 50 / hookrz 50 of the trading fee after Meteora's 20% protocol cut (`creatorTradingFeePercentage`
+  50; the platform is partner and fee claimer). No remix royalties: a remix copies the rules, never the fees.
+  Keeper rules change the split at launch (`src/fees.ts`, see the Keeper section): `prepare` returns it as `curve.feeSplit`.
 - Remixes pass the parent Stack: the engine records `parent_author` on chain (tested).
 - Custom blocks (Hookscript) accept any of:
   - `script.bytecode`;
@@ -93,10 +94,101 @@ The quote token is native SOL.
   - stage, price and progress, from the pool;
   - SSE events.
 
-#### Keeper (`src/keeper.ts`)
-- Auto-migration of a completed curve to DAMM v2 is real.
-- Burns, royalties and Hookscript game payouts are typed stubs (`planBurns`, `planRoyalties`, `planGamePayouts`).
-  Payouts would read `Script.globals` at offset 16 plus the ABI offset.
+#### Keeper (`src/keeper.ts`, `src/fees.ts`): every crank rule is enforced
+The keeper runs inside the API process (`svc.keeper.start()` in `index.ts`): one round every `KEEPER_TICK_MS`
+(default 60 s; 0 turns the loop off). Per coin with keeper rules, a round:
+1. **claims** the pool's partner trading fee (DBC `claimTradingFee2`, the transfer-hook variant; v1 refuses hooked
+   pools with 6076) and, after graduation, the fees of the platform's DAMM v2 position. The amount is read from the
+   pool vault's own delta in the transaction. Claims are per pool, so the accounting is per coin;
+2. **splits** it: hookrz keeps exactly its 50 points, Sniper Fee → Burn's excess goes to burning, each rule's share
+   accrues to its bucket, and the rounding or pass-through part is the creator's;
+3. **spends** it: buy-and-burn, then SOL payouts (≤ 18 transfers per transaction).
+
+Every claim, burn and payout is a public transaction, logged with its signature in `keeper_actions`. The per-coin
+ledger (`keeper_ledger`) records claimed (curve, DAMM v2), kept, and per rule accrued, paid, burned (SOL and tokens)
+and owed. The DBC → DAMM v2 migration crank is unchanged, and a round also cranks a completed curve if the
+indexer's auto-migration missed it.
+
+**Fee routing at launch.** The platform can't claim creator fees, so a coin with keeper rules routes their share
+of the creator's fees through the partner side of its own DBC config. Σ is the sum of the rules' `pct` plus the
+script's `payout` shares, at most 100% (`FEE_SHARES_INVALID` otherwise). Each rule's params must also be inside the
+blocks.js bounds.
+
+| Coin | `creatorTradingFeePercentage` | Platform claims | Keeps | Rules get | Creator |
+|---|---|---|---|---|---|
+| no keeper rules | 50 | 50 | 50 | — | claims its 50 from the pool |
+| keeper rules | 50 − ⌈Σ/2⌉ | 50 + ⌈Σ/2⌉ | 50 | Σ/2 | claims its share; the keeper returns the ½-point rounding |
+| with Sniper Fee → Burn | **0** | 100 | 50 of the base fee | Σ/2 of the base fee | the keeper pays it 50 − Σ/2 of the base fee every round |
+
+- **Sniper Fee → Burn deviates from the plain routing.** The split is fixed for the pool's life. Only a 0% creator
+  share lets the whole excess (everything above the 1% base fee, after Meteora's 20%) be burned. Otherwise the
+  creator would keep its half of the sniper fees. On these coins the creator's curve fees are paid by the keeper.
+- **After graduation:** the routed share is a permanently locked partner position, `partnerPermanentLockedLiquidityPercentage`
+  = ⌈Σ⌉%. It comes out of the creator's LP: `creatorPermanentLocked` = max(0, LP Lock − ⌈Σ⌉), and the creator's
+  unlocked share is the rest. The keeper claims that position's fees (DAMM v2 collects them in SOL only for this
+  migration config) and spends all of them on the rules; hookrz keeps nothing after graduation, as before. That
+  slice of the LP is locked for good.
+- **Coins launched before this change** (creator 50 on chain) never routed shares. The keeper refuses to fund rules
+  from them (`allocateCurve` throws), and the bucket says "Not routed at launch". On such a coin, Sniper Fee → Burn
+  burns hookrz's own half of the excess.
+
+**The rules**
+
+| Rule | Share | How the keeper enforces it | Test (`tests/keeper.test.ts`) |
+|---|---|---|---|
+| Buyback & Burn | `pct`% of creator fees | Hourly: buys the coin and burns it (Token-2022 `burnChecked` of `minOut`, in the same transaction), then sweeps any extra. On the curve it is an ordinary buyer, sized by the rule-aware quote for its own wallet (`maxAllowed` × 0.95) and simulated first. On DAMM v2 it buys freely | supply falls by exactly the burned amount; keeper ends holding 0 |
+| Sniper Fee → Burn | the excess | Claims once the fee window plus 60 s has passed. Per indexed window trade: partner share of the trading fee × (fee − 1%) / fee, using DBC's own scheduler numerator at that second. Burned like a buyback | excess equals the chain's partner-fee accumulator deltas within 3 lamports (two buys and a sell in the window); creator paid exactly 30 points of the base fee |
+| Holder Rewards | `pct`% | Hourly, pro rata by balance to every holder ≥ `min`% of current supply. Read from Token-2022 accounts on chain (`getProgramAccounts`, memcmp mint). Excluded: creator, platform, pool vaults, burn address. At most 200 wallets a round. Direct transfers: no Merkle root or claim vault | exact pro-rata lamports; dust holder and creator left out |
+| First-Buyer Rebate | `pct`% | Accrues on the curve. At migration it fixes the first `n` distinct buyers (indexer order; creator and platform excluded) who still hold, then splits equally every round | seller excluded; equal split; ≤ n |
+| Tithe | `pct`% | Every round to `params.to`, an address required at prepare (`TITHE_ADDRESS_REQUIRED`) and fixed in the coin's stack | exact lamports to the address |
+| Kingmaker | `pct`% | Accrues on the curve. At migration, the top holder (vaults, platform and creator excluded) is paid for 30 days, then the share returns to the creator | king = biggest holder; accrued + DAMM v2 share paid |
+| Diamond Tiers | `pct`% | Hourly, pro rata to holders whose first coins arrived ≥ `hours` ago and who never sold. Read from the engine's Wallet records when the coin keeps them (`first_receipt_ts`, has-sold flag), plus the indexer, which also sees DAMM v2 sells. Without records, the indexer alone. No longer `RULE_NOT_LIVE`; it adds no engine slot | seller uncrowned; crown read from the record |
+| Hookscript `payout N% to g` | N% | **stream:** each round, the accrued share goes to the key in global `g` (Script account offset 16 + ABI offset); with no key yet it waits | King of the Hill: the king got 50% of the creator's fees to the lamport |
+| `… as pot` | N% | The whole pot goes to each new non-zero winner. A changed winner forces a claim first. A failed send is retried for the same winner | pot to winner 1; carry-over; winner 2 gets the rest |
+| `… to wallets where v` | N% | Equal split among owners whose bool wallet var is true (Wallet records via `getProgramAccounts`, dataSize 328, memcmp mint at 96, var at 192 + offset) and who still hold | hats: the late buyer and the seller excluded |
+
+After graduation the script's globals and the split lists are frozen in the ledger, because `close_stack` and
+`close_wallet` may delete the accounts later.
+
+**The transfer hook and keeper buys (no engine change, no platform exemption).** A curve buy by the keeper passes
+the hook like anyone's:
+- It **waits** while Snipe Shield, Anti-Bundle or Allowlist windows are open, so it never takes a buyer's slot.
+- Caps (Max Wallet, Rising Max, Chapters), the Circuit Breaker and Trading Hours size or **defer** it through the
+  rule-aware quote. The burn happens in the same transaction, so the keeper's balance never builds toward a cap.
+- Wallet-record stacks get the keeper's record opened by the router.
+- Anything still refused (Token Gate, Blocklist, a custom script) fails the simulation, is **deferred** with the
+  reason in the bucket's `note`, and retried next round.
+- **Hookscript coins never get keeper buys on the curve:** the buy would play the game (for example, take the King of
+  the Hill crown). Their burns wait for graduation and run on DAMM v2, where the hook is retired.
+
+**Failure handling.** Each coin and each phase (claim, graduation snapshot, burn, payout) is caught on its own. An
+error is logged as a `keeper_actions` row and in the ledger's `lastError`, and the next phase still runs. Amounts
+below the minimums wait in their bucket. The keeper never runs inside the indexer queue, and trading never waits on
+it (tested: a round with a dead RPC returns, trades still land, the next round recovers).
+
+**Settings (env):**
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `KEEPER_TICK_MS` | 60000 | round interval |
+| `KEEPER_MIN_CLAIM_SOL` | 0.01 | claim when at least this much is pending, or hourly otherwise |
+| `KEEPER_MIN_BURN_SOL` | 0.005 | smallest buy-and-burn |
+| `KEEPER_MIN_PAYOUT_SOL` | 0.001 | smallest transfer; transfers to empty accounts also need ≥ rent |
+| `KEEPER_EVERY_S` | 3600 | how often Holder Rewards, Diamond Tiers and Buyback run |
+| `KEEPER_SNIPER_GRACE_S` | 60 | wait after the fee window before claiming |
+| `KEEPER_MAX_RECIPIENTS` | 200 | most wallets paid in one round |
+| `KEEPER_BURN_CHUNKS` | 4 | most burn chunks per round |
+
+Tests call `svc.keeper.tick({ force: true })`.
+
+**Known gaps:**
+- Burns on Hookscript coins and the First-Buyer and Kingmaker shares wait for graduation. If a coin never graduates,
+  that SOL stays with the platform, shown as owed in the ledger.
+- The Sniper Fee excess relies on the indexer having seen every window trade. A missed trade's excess would count as
+  base fee.
+- Diamond Tiers without Wallet records trusts the indexer.
+- The keeper's buybacks show in the trade feed as buys by the platform address.
+- `POST /v1/fees/claim/prepare` (the creator's own claim) is still 501.
 
 #### API (`src/app.ts`, Fastify)
 - Every endpoint in `web/src/api/contract.js`, with the demo JSON shapes.
@@ -111,7 +203,8 @@ The quote token is native SOL.
   | `GET /v1/meta/:mint.json` | the mint's metadata URI |
   | `GET /v1/image/:mint` | the coin's image |
   | `GET /v1/stream?mint=` | live events (SSE) |
-  | `GET /v1/keeper` | keeper log |
+  | `GET /v1/keeper` | the keeper: loop, platform key, per-coin totals, latest actions |
+  | `GET /v1/coins/:mint/keeper` | a coin's fee routing and keeper ledger, every action with its signature |
   | `POST /v1/fork/airdrop`, `POST /v1/fork/warp` | fork only |
 
 ### E2E on the fork: `npm run test:e2e` (`tests/e2e-fork.test.ts`): 9 pass, 0 skipped
@@ -167,7 +260,7 @@ real DBC → Token-2022 → engine CPI chain. ENGINE's own table (worst case 19,
 
 Opening a Wallet record inside a buy (`open_wallet`, top level) costs about 4,700 CU on top.
 
-`npm test` also runs `tests/api.test.ts` (7 pass). It covers:
+`npm test` also runs `tests/api.test.ts` (7 pass) and `tests/keeper.test.ts` (9 pass, the keeper table above). The API tests cover:
 - a launch over HTTP, with the mint stable from preview to wallet;
 - resuming a half-landed launch;
 - a remix: parent author on chain, lineage, stacks;
@@ -273,7 +366,17 @@ cd web && VITE_API_BASE=http://127.0.0.1:8830 npx vite --host 127.0.0.1 --port 4
 - **ENGINE:** the script owner check uses the hardcoded `declare_id!`. A devnet deploy at a fresh address needs a build
   with that id, or a switch to the runtime `program_id`.
 - **Coordinator:** apply `web-patches/coin-ticket-live.patch` so the trade ticket sends the real prepared transaction.
-- Keeper phase 2: burns, royalties and Hookscript payouts are typed stubs.
+- **Site (coordinator / LAUNCH):**
+  - Tithe needs an address input: the server reads `params.to` on the Tithe slot, and blocks.js has no param for it yet.
+  - The coin page should show the keeper ledger (`GET /v1/coins/:mint/keeper`, or the `keeper` summary on
+    `GET /v1/coins/:mint`). It should cover:
+    - the routing, including "creator fees paid through the keeper" on Sniper Fee coins;
+    - per rule: paid, burned and owed, plus the `note` (deferred reasons);
+    - the actions, each with its transaction.
+  - The build review should show `curve.feeSplit` from prepare, including the locked partner LP share after
+    graduation.
+  - Stale text outside my scope: contract.js `SERVICES` (the keeper "posts reward roots") and
+    `web/src/ui/blocks-detail.js` (the crank panels).
 
 ## Devnet: hookrz_engine deployed and enforcing (2026-10-04)
 - **Program `5bewmrVEU8PZYqRQrYABwQB45tBuFMT4PVuWj2GiAQFQ`** (slim .so, 145,704 B). Deployed by `scripts/deploy-engine.cjs`: the BPF upgradeable loader driven from JS, because this ARM box has no Solana CLI. It creates a buffer, writes 154 chunks of 950 B, verifies them, then deploys at the exact size. Program-data rent is **0.741 SOL**; the whole deploy cost about 0.743 SOL. The upgrade authority is the devnet deployer `9zpog7…`.

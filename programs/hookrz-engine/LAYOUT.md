@@ -1,7 +1,7 @@
 # hookrz_engine: accounts, instruction data and param encodings
 
 Program id (local fork): `EiZ3npNmrPCkAjskdMR7RDJQcojC9p8CHNr1dR4DPxKr` (`program-keypair.json`). All integers are little-endian.
-A JS encoder for everything on this page is in `js/layout.mjs` (`packParams`, `initStackData`, `decodeStack`, `decodeWallet`, PDAs); BACKEND can import it.
+A JS encoder for everything on this page is in `js/layout.mjs` (`packParams`, `initStackData`, `setMarkData`, `decodeStack`, `decodeWallet`, `decodeMark`, `gateOf`, `hourSoldOf`, PDAs, `GATE_TOKENS`); BACKEND can import it.
 
 ## PDAs (seeds, program = hookrz_engine)
 | Account | Seeds |
@@ -9,6 +9,7 @@ A JS encoder for everything on this page is in `js/layout.mjs` (`packParams`, `i
 | Stack | `["stack", mint]` |
 | Script | `["script", mint]` |
 | Wallet record | `["w", mint, token_account]` |
+| Mark (Blocklist / Allowlist Phase) | `["mark", mint, owner]` (owner = a wallet address, not a token account) |
 | ExtraAccountMetaList | `["extra-account-metas", mint]` |
 
 ## Instructions
@@ -26,6 +27,7 @@ Accounts:
 | 6 | script | writable, PDA (always passed; created only for a Hookscript stack) |
 | 7 | system program | |
 | 8 | parent stack | only if data flag bit 0 (a remix); its creator becomes `parent_author` |
+| 8 or 9 | gate mint | only if the stack has Token Gate: another token's mint (owner SPL Token or Token-2022, initialized, not this mint), after the parent if any |
 
 Data:
 ```
@@ -37,6 +39,7 @@ Data:
 +2    [u8; script_len] Hookscript bytecode (≤ 1024)
 ```
 Refusals: bad data, an unknown block, a duplicate block, params outside the ranges below → `InvalidInstructionData`;
+a Token Gate without a valid gate mint account → `InvalidAccountData` ("The gate must be another token's mint");
 already initialized → custom error **6143** `StackLocked`; a script that fails `hookscript_vm::verify` → **6128**.
 (A build with `--no-default-features` has no VM and refuses every scripted stack.)
 
@@ -46,8 +49,21 @@ The ExtraAccountMetaList is written in this order, each entry only if the stack 
 3. Wallet(src) PDA `["w", mint, source]` and 4. Wallet(dst) PDA `["w", mint, destination]` (both writable) if Sandwich Guard, Sell Cooldown, Hold Timer or Custom
 5. Script (fixed address, writable) if Custom
 6. Instructions sysvar `Sysvar1nstructions1111111111111111111111111` (read-only) if the script's header has the APP flag (0x08, reads `transfer.app`)
+7. Mark(src) `["mark", mint, source.owner]` and 8. Mark(dst) `["mark", mint, destination.owner]` (both read-only) if Blocklist or
+   Allowlist Phase. Seeds: literal `mark`, account key 1, **account data** (account 0 / 2, offset 32, length 32 = the token account's owner).
+9. Gate mint (fixed, read-only), 10. its token program (fixed, read-only; SPL Token or Token-2022, the mint's owner at init),
+   11. ATA program `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL` (fixed, read-only), 12. the destination owner's ATA of the gate mint
+   (read-only): discriminator 128 + index of the ATA program, seeds [account data (2, 32, 32), account key (token program), account key (gate mint)]
+   = `[destination.owner, gate token program, gate mint]` under the ATA program. These four only if Token Gate.
 
 A Custom slot (Hookscript) always adds the pool and both wallet records (scripts read price/progress and wallets).
+Chapters adds the pool; Seasoned Sells the wallet records; the Hourly Outflow Cap makes the Stack writable.
+
+Account-data seeds (marks, the gate ATA) need the token accounts to exist when the list is resolved. Token-2022 resolves
+on chain at transfer time (the receiver's ATA exists by then), but off-chain resolvers that run before the ATA is created,
+or that pass dummy accounts (the Meteora DBC SDK's `getRemainingAccountsForTransferHook` resolves with `PublicKey.default`),
+fail for these stacks. The extra accounts are fully determined by the Stack's `flags` plus the two owners, so BACKEND
+rebuilds them offline (`server/src/hook.ts extrasFromStack`) and hands them to the SDK.
 
 ### `write_script` (`0xA4`): pool creator, before init_stack (scripts too big for the launch transaction)
 Accounts: creator (signer, w; the DBC pool's creator), mint (its hook names hookrz_engine), pool, stack PDA (must not exist yet),
@@ -64,6 +80,20 @@ data flag bit 1, which verifies the staged script and seals it (version 1). Afte
 ### `open_wallet` (`0xA1`): anyone, idempotent
 Accounts: payer (signer, w), mint, token account (Token-2022, of this mint), wallet record (w, PDA), system program. Data: `[0xA1]`.
 The payer gets the rent back after graduation. A pre-funded record address is handled (M1).
+
+### `set_mark` (`0xA5`): the coin's creator (Blocklist marks, Allowlist passes)
+Accounts: creator (signer, w; must equal the Stack's `creator`, pays the mark's rent), mint, stack, mark (w, PDA
+`["mark", mint, owner]`), system program. Data:
+```
+0  u8   0xA5
+1  u8   flags: bit 0 (1) blocked · bit 1 (2) pass; the mark's new value
+2  [32] owner (wallet address)
+```
+- The blocked bit needs a Blocklist slot and the pass bit an Allowlist Phase slot in the stack, else `InvalidInstructionData`.
+- The blocked bit may change only while the list is open: in the launch slot (so marks can ride in the init_stack transaction),
+  or while `now − launch_ts < lock` (the Blocklist param). After that a change of the blocked bit → **6143** `StackLocked`
+  ("The blocklist is frozen"). Passes can change at any time.
+- The first call for an owner creates the mark (65 bytes, ~0.0013 SOL rent, paid by the creator; there is no close path).
 
 ### `close_wallet` (`0xA2`): anyone, after the hook is retired
 Accounts: wallet record (w), mint, rent payer recorded at open (w). Data: `[0xA2]`. While the mint's hook still names
@@ -87,6 +117,9 @@ Token-2022 calls it with `[source, mint, destination, authority, extra-account-m
   Program log: 0x17f0, 0x<reason id>, 0x<arg as u64 (two's complement for negatives)>, 0x<format kind>, 0x0
   Program log: Error Code: CustomRuleRefused. Error Number: 6128
   ```
+  The `Error Code: <Name>. Error Number: <code>` line is built at run time from one names table (no core::fmt); the names are
+  blocks.js `ERR_NAMES`: 6000 NotInTransfer … 6006 Blocklisted, 6007 NoAllowlistPass, 6013 NotSeasoned, 6014 HourlyOutflowCap,
+  6017 TokenGated, 6018 ChapterCap … 6143 StackLocked.
   Off-chain code fills the message with `format_reason(code, reason_id, arg)` (hookscript compiler/TS). A VM fault logs
   `HookscriptFault: <name>` and fails with 6128.
 - State is written only after every check passed (the VM writes globals and wallet vars only on Allow).
@@ -104,13 +137,19 @@ block_id = error code − 6000. bps = percent × 100.
 | 3 | max-wallet | 6003 | 0: u16 bps = `pct`×100 | 50..1000 |
 | 4 | rising-max | 6004 | 0: u16 from bps = `from`×100; 2: u16 to bps = `to`×100; 4: u32 seconds = `hours`×3600 | 25..500, 100..2000, 3600..259200 |
 | 5 | sandwich-guard | 6005 | 0: u32 `slots` | 1..150 |
+| 6 | blocklist | 6006 | 0: u32 lock seconds from `lockAt`: at graduation = `0xFFFFFFFF` (open while the hook is live), after 24h = 86400, immediately = 0 (the launch slot only) | one of those three |
+| 7 | allowlist-phase | 6007 | 0: u32 seconds = `minutes`×60 | 300..86400 |
 | 8 | sell-cap | 6008 | 0: u16 bps = `pct`×100 | 10..500 |
 | 9 | sell-cooldown | 6009 | 0: u32 seconds = `minutes`×60 | 60..14400 |
 | 10 | hold-timer | 6010 | 0: u32 seconds = `minutes`×60 | 300..86400 |
 | 11 | circuit-breaker | 6011 | 0: u32 window seconds = `window`×60; 4: u16 band bps = `band`×100 | 60..3600, 500..5000 |
 | 12 | trading-hours | 6012 | 0: u8 `open` (UTC hour); 1: u8 `close` | open 0..23, close 1..24, **open < close** |
+| 13 | seasoned-sells | 6013 | 0: u8 `base` (%); 1: u8 `step` (% per hour) | 5..50, 5..50 |
+| 14 | outflow-cap | 6014 | 0: u16 bps = `pct`×100 (of supply per hour) | 100..2000 |
 | 15 | lock-in | 6015 | 0: u16 bps = `pct`×100 (curve fill) | 1000..6000 |
 | 16 | creator-vest | 6016 | 0: u32 cliff seconds = `cliff`×86400; 4: u32 vest seconds = `days`×86400 | 0..2592000, 604800..31536000 |
+| 17 | token-gate | 6017 | 0: u64 minimum in the gate mint's **raw** units = `min` × 10^decimals (the gate mint is an init_stack account, see above) | ≥ 1 |
+| 18 | chapters | 6018 | 0: u16 first-chapter cap bps = `first`×100; 2: u8 `n` | 25..300, 2..5 |
 | 128 | custom | 6128 | none (all zero); the Hookscript runs after every slot | |
 
 How the engine fills the reference `ctx` on chain:
@@ -125,6 +164,16 @@ How the engine fills the reference `ctx` on chain:
 - `creatorBase` (Creator Vesting) = the creator's launch bag: everything it bought in the slot of its first buy (normally the
   launch transaction), kept in the slot state. Coins the creator gets later are free. The check is
   `srcBefore − amount < creatorBase × (1 − clamp((t − cliff) / span, 0, 1))` with nothing vested before the cliff.
+- `blocked` (Blocklist) = the source owner's mark has bit 1 (sells, sends) or the destination owner's mark has bit 1 (buys,
+  sends); the curve vault's side never counts. `hasPass` (Allowlist Phase) = the destination owner's mark has bit 2.
+- `isCreator` also exempts the creator's launch-slot buy from Allowlist Phase (as for Snipe Shield and Anti-Bundle).
+- `hourSold` (Hourly Outflow Cap) = raw units sold to the curve in hour `floor((now − launch_ts) / 3600)`, from the slot state.
+- `gateBal` (Token Gate) = the amount in the destination owner's ATA of the gate mint (0 if it doesn't exist, or if its mint
+  or owner field doesn't match); compared with the raw minimum.
+- Chapters: `chapterOf = min(n − 1, floor(progress × n))` exactly, as the number of k in 1..n−1 with `quote_reserve × n ≥ k × threshold`;
+  refused if `dstAfter × 10000 > supply × (first_bps << chapter)`.
+- Seasoned Sells: `hours = floor((now − first_receipt_ts) / 3600)` (≥ 0, capped at 100); refused if
+  `amount × 100 > srcBefore × min(100, base + step × hours)`. Needs wallet records (first receipt).
 - Comparisons are exact integer maths over raw units (e.g. Max Wallet: `dstAfter × 10000 > supply × bps`).
 
 Known differences from the reference text (the checks themselves match blocks.js exactly):
@@ -144,7 +193,7 @@ Known differences from the reference text (the checks themselves match blocks.js
 | 0 | discriminator | [u8; 8] | sha256("account:Stack")[..8] = `3a46a8f4bca9814f` |
 | 8 | version | u8 | 1 |
 | 9 | bump | u8 | |
-| 10 | flags | u16 | 1 armed · 2 pool meta · 4 wallet metas · 8 script · 16 stack writable · 32 instructions sysvar meta (script APP flag) |
+| 10 | flags | u16 | 1 armed · 2 pool meta · 4 wallet metas · 8 script · 16 stack writable · 32 instructions sysvar meta (script APP flag) · 64 mark metas (Blocklist / Allowlist Phase) · 128 Token Gate metas |
 | 12 | slot_count | u8 | 1..6 |
 | 13 | meta_bump | u8 | |
 | 14 | script_bump | u8 | |
@@ -168,6 +217,8 @@ Slot state:
 - Anti-Bundle `0: u64 slot · 8: u64 buys in it`.
 - Circuit Breaker `0: i64 window index (now / window) · 8: u128 window-open sqrt price`.
 - Creator Vesting `0: u64 launch bag (raw) · 8: u64 slot of the creator's first buy · 16: u8 recorded`.
+- Hourly Outflow Cap `0: u64 hour since launch · 8: u64 raw units sold in it` (the same bucketed counter as Anti-Bundle's).
+- Token Gate `0..32: the gate mint` (written at init, for readers; Execute takes the mint from the meta list).
 - Custom `0..27: the DBC config's BaseFeeConfig (cliff_fee_numerator u64 · period_frequency u64 · reduction_factor u64 ·
   number_of_period u16 · base_fee_mode u8) · 27: u8 activation type (0 slot, 1 timestamp) · 28: u8 dynamic fee on`, copied at init.
   Hookscript's `fee_bps` is the scheduler's base fee now (linear or exponential, as the DBC SDK computes it); the dynamic fee and
@@ -203,6 +254,16 @@ Slot state:
 Lot buckets: with a Hold Timer, epoch = ceil(hold / 4) and a lot stays live for `hold`; otherwise hourly buckets that stay
 live for 4 hours. A receipt (or outflow) at `t` lands in the lot `ceil(t / epoch) × epoch`; at most 5 bucket times are
 ever live at once, so no live lot is ever evicted or moved.
+
+## Mark `["mark", mint, owner]` (65 bytes; Blocklist / Allowlist Phase)
+| Off | Field | Notes |
+|---|---|---|
+| 0 | flags u8 | 1 blocked · 2 pass |
+| 1 | mint | Pubkey |
+| 33 | owner | Pubkey (the wallet address the mark is for) |
+
+No discriminator: only `set_mark` creates accounts at `"mark"` PDAs, so an account of ours at that address is a mark.
+List a coin's marks with getProgramAccounts(dataSize 65, memcmp offset 1 = mint).
 
 ## Script account `["script", mint]` (1,296 bytes, hookscript/SPEC.md §8)
 | Off | Field |

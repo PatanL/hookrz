@@ -44,8 +44,11 @@ function base() {
     quoteReserve: 50n * 10n ** 9n, threshold: 100n * 10n ** 9n, sqrtAfter: 1n << 64n, sqrtOpen: 1n << 64n,
     srcBefore: 0n, dstAfter: 0n, isCreator: false, isCreatorSrc: false,
     w: { lots: [], lastBuySlot: null, lastSellT: null, firstT: null }, slotBuys: 0, creatorBase: 0n,
+    // Inputs of the blocks added later (neutral defaults: nobody blocked, everyone holds a pass and the gate).
+    blocked: false, hasPass: true, hourSold: 0n, gateBal: U64_MAX,
   };
 }
+const U64_MAX = (1n << 64n) - 1n;
 const ctxOf = (o) => ({ ...base(), ...o, w: { ...base().w, ...(o.w ?? {}) } });
 
 /** The reference engine's float ctx for a chain ctx. */
@@ -56,7 +59,7 @@ function jsCtx(c) {
     progress: Number(c.quoteReserve) / Number(c.threshold), priceAfter: sp(c.sqrtAfter), windowOpenPrice: sp(c.sqrtOpen),
     srcBefore: Number(c.srcBefore), dstAfter: Number(c.dstAfter), isCreatorSrc: c.isCreatorSrc, isCreator: c.isCreator,
     w: { lots: c.w.lots.map((l) => ({ t: l.t, amt: Number(l.amt) })), lastBuySlot: c.w.lastBuySlot == null ? null : Number(c.w.lastBuySlot), lastSellT: c.w.lastSellT, firstT: c.w.firstT },
-    slotBuys: c.slotBuys, creatorBase: Number(c.creatorBase), hourSold: 0, hasPass: true, gateBal: 1e18, blocked: false,
+    slotBuys: c.slotBuys, creatorBase: Number(c.creatorBase), hourSold: Number(c.hourSold), hasPass: c.hasPass, gateBal: Number(c.gateBal), blocked: c.blocked,
   };
 }
 
@@ -85,6 +88,21 @@ function exact(id, p, c) {
       const el = c.t < cliff ? 0n : BigInt(Math.min(c.t - cliff, span));
       return (c.srcBefore - c.amount) * BigInt(span) < c.creatorBase * (BigInt(span) - el);
     }
+    case 'seasoned-sells': {
+      if (c.kind !== 'sell' || c.w.firstT == null) return false;
+      const h = Math.floor(Math.max(0, c.t - c.w.firstT) / 3600);
+      const p100 = BigInt(Math.min(100, p.base + p.step * Math.min(h, 100)));
+      return c.amount * 100n > c.srcBefore * p100;
+    }
+    case 'outflow-cap': return c.kind === 'sell' && overBps(c.hourSold + c.amount, c.supply, bpsOf(p.pct));
+    case 'token-gate': return c.kind !== 'sell' && c.gateBal < BigInt(p.min) * 10n ** BigInt(p.decimals);
+    case 'chapters': {
+      if (c.kind !== 'buy') return false;
+      let k = 0n;
+      const n = BigInt(p.n);
+      while (k + 1n < n && c.quoteReserve * n >= (k + 1n) * c.threshold) k++;
+      return overBps(c.dstAfter, c.supply, bpsOf(p.first) << k);
+    }
     default: return null; // the float check is exact for this block
   }
 }
@@ -112,6 +130,7 @@ function add(file, name, stack, c) {
       srcBefore: String(c.srcBefore), dstAfter: String(c.dstAfter), isCreator: c.isCreator, isCreatorSrc: c.isCreatorSrc,
       w: { lots: c.w.lots.map((l) => ({ t: l.t, amt: String(l.amt) })), lastBuySlot: c.w.lastBuySlot == null ? null : String(c.w.lastBuySlot), lastSellT: c.w.lastSellT, firstT: c.w.firstT },
       slotBuys: c.slotBuys, creatorBase: String(c.creatorBase),
+      blocked: c.blocked, hasPass: c.hasPass, hourSold: String(c.hourSold), gateBal: String(c.gateBal),
     },
     expect: { ok: r.ok, code: r.ok ? null : r.code, index, refusedBy: r.ok ? null : r.refusedBy },
   });
@@ -257,6 +276,84 @@ for (let i = 0; i < 1500; i++) {
   add('stacks', `stack ${i}`, ids.map((id) => ({ id, params: randParams(id) })), randomCtx());
 }
 add('stacks', 'empty stack passes', [], randomCtx());
+
+// ───── the six blocks added on 2026-10-04 (appended so every vector above keeps its random draws) ─────
+const NEW_IDS = ['blocklist', 'allowlist-phase', 'seasoned-sells', 'outflow-cap', 'token-gate', 'chapters'];
+/** Params for the new blocks: options drawn at random; Token Gate in raw units (decimals 0: raw = whole). */
+function randParamsNew(id) {
+  const p = randParams(id);
+  for (const s of byId[id].params) if (s.options) p[s.key] = pick(s.options);
+  if (id === 'token-gate') { p.ticker = '$GATE'; p.decimals = 0; }
+  return p;
+}
+function randomCtxNew() {
+  const c = randomCtx();
+  const pctAmt = () => SUPPLY * big(0, 3000) / 100000n;
+  c.blocked = rnd() < 0.2;
+  c.hasPass = rnd() < 0.5;
+  c.hourSold = rnd() < 0.3 ? 0n : pctAmt() * big(1, 8);
+  c.gateBal = rnd() < 0.2 ? 0n : big(0, 2_000_000);
+  return c;
+}
+for (const id of NEW_IDS) {
+  const f = id;
+  for (let rep = 0; rep < 3; rep++) {
+    const p = rep === 0 ? { ...defaults(id), ...(id === 'token-gate' ? { ticker: '$GATE', decimals: 0 } : {}) } : randParamsNew(id);
+    const st = (q) => [{ id, params: q }];
+    for (const kind of KINDS) {
+      switch (id) {
+        case 'blocklist':
+          for (const blocked of [false, true]) add(f, `edge ${kind} blocked=${blocked} lock=${p.lockAt}`, st(p), ctxOf({ kind, blocked }));
+          break;
+        case 'allowlist-phase':
+          for (const t of [0, p.minutes * 60 - 1, p.minutes * 60, p.minutes * 60 + 1]) for (const hasPass of [false, true]) for (const isCreator of [false, true])
+            add(f, `edge ${kind} t=${t} pass=${hasPass} creator=${isCreator}`, st(p), ctxOf({ kind, t, hasPass, isCreator }));
+          break;
+        case 'seasoned-sells': {
+          const t = 400_000;
+          for (const h of [0, 1, 2, 7, 8, 9, 50, 200]) for (const d of [0, 1, 3599]) for (const srcBefore of [1_000_000n, 999_999n, 7n, 0n]) {
+            const pc = BigInt(Math.min(100, p.base + p.step * h));
+            const x = srcBefore * pc / 100n;
+            for (const amount of [0n, x - 1n, x, x + 1n, srcBefore, srcBefore + 1n].filter((a) => a >= 0n))
+              add(f, `edge ${kind} h=${h} d=${d} src=${srcBefore} amt=${amount}`, st(p), ctxOf({ kind, t, amount, srcBefore, w: { firstT: t - h * 3600 - d } }));
+          }
+          add(f, `edge ${kind} never received`, st(p), ctxOf({ kind, amount: 5n, srcBefore: 5n }));
+          break;
+        }
+        case 'outflow-cap': {
+          const cap = thr(p.pct);
+          for (const hourSold of [0n, cap / 2n, cap - 1n, cap, cap + 1n]) for (const amount of around(cap > hourSold ? cap - hourSold : 1n))
+            add(f, `edge ${kind} sold=${hourSold} amt=${amount}`, st(p), ctxOf({ kind, hourSold, amount }));
+          break;
+        }
+        case 'token-gate': {
+          const min = BigInt(p.min);
+          for (const gateBal of [0n, min - 1n, min, min + 1n, min * 1000n, U64_MAX]) add(f, `edge ${kind} gate=${gateBal}`, st(p), ctxOf({ kind, gateBal }));
+          break;
+        }
+        case 'chapters': {
+          const T = 85n * 10n ** 9n, n = BigInt(p.n);
+          for (let k = 0n; k <= n; k++) {
+            const at = k * T / n;
+            for (const qr of [at - 1n, at, at + 1n, T * 3n].filter((q) => q >= 0n)) {
+              const ch = (() => { let j = 0n; while (j + 1n < n && qr * n >= (j + 1n) * T) j++; return j; })();
+              const cap = SUPPLY * (bpsOf(p.first) << ch) / 10000n;
+              for (const dstAfter of around(cap)) add(f, `edge ${kind} qr=${qr} dst=${dstAfter}`, st(p), ctxOf({ kind, quoteReserve: qr, threshold: T, dstAfter }));
+            }
+          }
+          break;
+        }
+      }
+    }
+  }
+}
+for (const id of NEW_IDS) for (let i = 0; i < 400; i++) add(id, `random ${i}`, [{ id, params: randParamsNew(id) }], randomCtxNew());
+// Random stacks over all 18 hook blocks: slot order and the first refusal.
+const ALL_IDS = [...HOOK_IDS, ...NEW_IDS];
+for (let i = 0; i < 1500; i++) {
+  const ids = [...ALL_IDS].sort(() => rnd() - 0.5).slice(0, ri(2, 6));
+  add('stacks-all', `stack ${i}`, ids.map((id) => ({ id, params: NEW_IDS.includes(id) ? randParamsNew(id) : randParams(id) })), randomCtxNew());
+}
 
 // lastBuySlot came out as a string in the random ctx (slot is a BigInt); normalize for JSON + Number().
 for (const [file, list] of Object.entries(files)) {

@@ -28,9 +28,15 @@ export type TxRecord = {
   ixs: { program: string; accounts: string[]; data: string }[];
 };
 
+/** getProgramAccounts filters: `memcmp` bytes are raw (not base58), `dataSize` exact. */
+export type AccountFilter = { memcmp: { offset: number; bytes: Uint8Array } } | { dataSize: number };
+export type ProgramAccount = { pubkey: PublicKey; account: ChainAccount };
+
 export interface Chain {
   readonly mode: Mode;
   read(keys: PublicKey[]): Promise<ChainRead>;
+  /** Every account a program owns that matches all filters (the keeper's holder and Wallet-record scans). */
+  programAccounts(program: PublicKey, filters: AccountFilter[]): Promise<ProgramAccount[]>;
   rent(bytes: number): Promise<number>;
   blockhash(): Promise<{ blockhash: string; lastValidBlockHeight: number }>;
   simulate(bytes: Uint8Array): Promise<Simulation>;
@@ -39,6 +45,16 @@ export interface Chain {
   /** Subscribe to every transaction this chain sees (fork: every send; devnet: indexer polling). */
   onTx(f: (r: TxRecord) => void): () => void;
   record(signature: string): Promise<TxRecord | null>;
+}
+
+export function matches(data: Uint8Array, filters: AccountFilter[]) {
+  return filters.every((f) => {
+    if ("dataSize" in f) return data.length === f.dataSize;
+    const { offset, bytes } = f.memcmp;
+    if (offset + bytes.length > data.length) return false;
+    for (let i = 0; i < bytes.length; i++) if (data[offset + i] !== bytes[i]) return false;
+    return true;
+  });
 }
 
 /** `custom program error: 0x1771` or `Custom(6001)` → 6001. */

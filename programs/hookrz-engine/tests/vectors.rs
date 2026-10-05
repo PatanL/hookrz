@@ -62,6 +62,11 @@ fn ctx_of(c: &Value) -> Ctx {
         },
         slot_buys: num(&c["slotBuys"]),
         creator_base: num(&c["creatorBase"]),
+        // Vectors from before these blocks existed carry the reference engine's neutral defaults.
+        blocked: c["blocked"].as_bool().unwrap_or(false),
+        has_pass: c["hasPass"].as_bool().unwrap_or(true),
+        hour_sold: opt(&c["hourSold"]).unwrap_or(0),
+        gate_bal: opt(&c["gateBal"]).unwrap_or(u64::MAX),
     }
 }
 

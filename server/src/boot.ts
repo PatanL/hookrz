@@ -8,6 +8,7 @@ import { HookrzEngine, AwayRules, type HookProgram } from "./hook.js";
 import { Store } from "./store.js";
 import { Hookrz } from "./service.js";
 import { env, engineSo, engineId, AWAY_RULES_ID, AWAY_RULES_SO, RUNTIME, ROOT } from "./env.js";
+import { forkGateMints } from "./marks.js";
 
 export function loadKeypair(path: string, create = false) {
   if (existsSync(path)) return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(path, "utf8"))));
@@ -42,6 +43,7 @@ export async function boot(o: { db?: string; forkState?: string | null; publicBa
   const chain = new ForkChain({ dir: env.forkDir, programs: so ? [{ id: hook.id.toBase58(), so }] : [], statePath: o.forkState ?? env.forkState, wallClock: o.wallClock ?? process.env.FORK_WALL_CLOCK === "true" });
   const platform = loadKeypair(resolve(RUNTIME, "platform-fork.json"), true);
   chain.fund(platform.publicKey, 1000);
+  forkGateMints(chain); // Token Gate tickers need their mints on the fork (mainnet addresses, stand-in data)
   const svc = new Hookrz({ chain, store, hook, platform, solUsd: env.solUsd, thresholdSol: o.thresholdSol ?? env.thresholdSol, publicBase: o.publicBase, autoMigrate: true });
   return { svc, chain, hookWhy: why };
 }

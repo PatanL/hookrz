@@ -2,11 +2,14 @@
 // (pass `pubkey.toBytes()`); derive PDAs with your own web3 library from the seeds below.
 
 export const PROGRAM_ID = 'EiZ3npNmrPCkAjskdMR7RDJQcojC9p8CHNr1dR4DPxKr';
-export const IX = { initStack: 0xa0, openWallet: 0xa1, closeWallet: 0xa2, closeStack: 0xa3, writeScript: 0xa4 };
+export const IX = { initStack: 0xa0, openWallet: 0xa1, closeWallet: 0xa2, closeStack: 0xa3, writeScript: 0xa4, setMark: 0xa5 };
 export const EXECUTE_DISCRIMINATOR = Uint8Array.from([105, 37, 101, 197, 75, 251, 102, 26]);
 export const STACK_SIZE = 640;
 export const WALLET_SIZE = 328;
 export const SCRIPT_SIZE = 1296;
+/** Mark ["mark", mint, owner]: flags u8 · mint · owner (Blocklist / Allowlist Phase). */
+export const MARK_SIZE = 65;
+export const MARK = { blocked: 1, pass: 2 };
 export const LOTS = 5;
 const enc = new TextEncoder();
 export const SEEDS = {
@@ -14,17 +17,42 @@ export const SEEDS = {
   script: (mint) => [enc.encode('script'), mint],
   wallet: (mint, tokenAccount) => [enc.encode('w'), mint, tokenAccount],
   extraMetas: (mint) => [enc.encode('extra-account-metas'), mint],
+  mark: (mint, owner) => [enc.encode('mark'), mint, owner],
 };
+export const ATA_PROGRAM_ID = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
+export const SPL_TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+
+/**
+ * Token Gate: the site's gate tickers → mainnet mints (all SPL Token). The on-chain param is the minimum in the
+ * gate mint's raw units; the mint itself is passed to init_stack. $HOOKRZ has no mint yet, so it can't be packed.
+ */
+export const GATE_TOKENS = {
+  $BONK: { mint: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', decimals: 5 },
+  $WIF: { mint: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBeBF8C3X2tE5L4ga', decimals: 6 },
+  $JUP: { mint: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', decimals: 6 },
+};
+/** Blocklist `lockAt` → seconds after launch the list stays editable (u32::MAX: until graduation; 0: the launch slot only). */
+export const BLOCKLIST_LOCK = { 'at graduation': 0xffffffff, 'after 24h': 86400, immediately: 0 };
 
 /** block id (u16 in the Stack) = error code - 6000. */
 export const BLOCK_IDS = {
   'snipe-shield': 1, 'anti-bundle': 2, 'max-wallet': 3, 'rising-max': 4, 'sandwich-guard': 5,
+  blocklist: 6, 'allowlist-phase': 7,
   'sell-cap': 8, 'sell-cooldown': 9, 'hold-timer': 10, 'circuit-breaker': 11, 'trading-hours': 12,
-  'lock-in': 15, 'creator-vest': 16, custom: 128,
+  'seasoned-sells': 13, 'outflow-cap': 14,
+  'lock-in': 15, 'creator-vest': 16, 'token-gate': 17, chapters: 18, custom: 128,
 };
 export const BLOCK_NAMES = Object.fromEntries(Object.entries(BLOCK_IDS).map(([k, v]) => [v, k]));
 
 const bps = (pct) => Math.round(pct * 100);
+/** Token Gate minimum in the gate mint's raw units: `p.minRaw`, else `p.min` whole tokens × 10^decimals (`p.decimals` or GATE_TOKENS). */
+export function gateMinRaw(p) {
+  if (p.minRaw != null) return BigInt(p.minRaw);
+  const dec = p.decimals ?? GATE_TOKENS[p.ticker]?.decimals;
+  if (dec == null) throw new Error(`${p.ticker} has no mint yet, so it can't gate a coin`);
+  return BigInt(Math.round(+p.min)) * 10n ** BigInt(dec);
+}
+
 /** Pack one block's params (blocks.js units, defaults already filled) into the 24-byte slot area. */
 export function packParams(id, p) {
   const b = new Uint8Array(24), v = new DataView(b.buffer);
@@ -42,6 +70,16 @@ export function packParams(id, p) {
     case 'trading-hours': b[0] = p.open; b[1] = p.close; break;
     case 'lock-in': u16(0, bps(p.pct)); break;
     case 'creator-vest': u32(0, p.cliff * 86400); u32(4, p.days * 86400); break;
+    case 'blocklist': {
+      const lock = BLOCKLIST_LOCK[p.lockAt];
+      if (lock === undefined) throw new Error(`blocklist lockAt must be one of ${Object.keys(BLOCKLIST_LOCK).join(', ')}`);
+      u32(0, lock); break;
+    }
+    case 'allowlist-phase': u32(0, p.minutes * 60); break;
+    case 'seasoned-sells': b[0] = p.base; b[1] = p.step; break;
+    case 'outflow-cap': u16(0, bps(p.pct)); break;
+    case 'token-gate': v.setBigUint64(0, gateMinRaw(p), true); break;
+    case 'chapters': u16(0, bps(p.first)); b[2] = p.n; break;
     case 'custom': break;
     default: throw new Error(`${id} is not a hook block of hookrz_engine`);
   }
@@ -98,6 +136,7 @@ export function decodeStack(data) {
   const flags = v.getUint16(10, true);
   return {
     version: d[8], bump: d[9], flags, armed: !!(flags & 1), hasPool: !!(flags & 2), hasWallets: !!(flags & 4), hasScript: !!(flags & 8), stackWritable: !!(flags & 16), hasApp: !!(flags & 32),
+    hasMarks: !!(flags & 64), hasGate: !!(flags & 128),
     mint: key(16), creator: key(48), pool: key(80), baseVault: key(112), parentStack: key(144), parentAuthor: key(176),
     launchSlot: v.getBigUint64(208, true), launchTs: v.getBigInt64(216, true), slots,
     script: key(572), lastSqrt: u128(v, 604), migrationQuoteThreshold: v.getBigUint64(620, true), activationPoint: v.getBigUint64(628, true),
@@ -111,6 +150,39 @@ export function creatorBaseOf(stack) {
   const b = Uint8Array.from(s.state.match(/../g).map((h) => parseInt(h, 16)));
   const v = new DataView(b.buffer);
   return b[16] ? v.getBigUint64(0, true) : 0n;
+}
+
+const slotStateBytes = (stack, block) => {
+  const s = stack.slots.find((x) => x.block === block);
+  return s ? Uint8Array.from(s.state.match(/../g).map((h) => parseInt(h, 16))) : null;
+};
+/** Hourly Outflow Cap state of a decoded Stack: raw units sold to the curve in hour `hour` (= floor((now − launchTs) / 3600)). */
+export function hourSoldOf(stack, hour) {
+  const b = slotStateBytes(stack, 'outflow-cap');
+  if (!b) return 0n;
+  const v = new DataView(b.buffer);
+  return v.getBigUint64(0, true) === BigInt(hour) ? v.getBigUint64(8, true) : 0n;
+}
+/** Token Gate of a decoded Stack: the gate mint (32 bytes, from the slot state) and the minimum in its raw units. */
+export function gateOf(stack) {
+  const s = stack.slots.find((x) => x.block === 'token-gate');
+  if (!s) return null;
+  const p = Uint8Array.from(s.params.match(/../g).map((h) => parseInt(h, 16)));
+  return { mint: slotStateBytes(stack, 'token-gate'), minRaw: new DataView(p.buffer).getBigUint64(0, true) };
+}
+
+/**
+ * set_mark (0xA5) data: the creator sets one owner's mark. flags: MARK.blocked (needs Blocklist; only while the list is
+ * open) | MARK.pass (needs Allowlist Phase). Accounts: creator (signer, w), mint, stack, mark PDA (w), system program.
+ */
+export function setMarkData(flags, owner) {
+  const out = new Uint8Array(34);
+  out[0] = IX.setMark; out[1] = flags; out.set(owner, 2);
+  return out;
+}
+export function decodeMark(data) {
+  const d = data instanceof Uint8Array ? data : Uint8Array.from(data);
+  return { flags: d[0], blocked: !!(d[0] & MARK.blocked), pass: !!(d[0] & MARK.pass), mint: d.slice(1, 33), owner: d.slice(33, 65) };
 }
 
 export function decodeWallet(data) {

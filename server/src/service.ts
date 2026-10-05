@@ -17,7 +17,9 @@ import type { Chain, TxRecord } from "./chain.js";
 import type { HookProgram } from "./hook.js";
 import type { Store, CoinRow, TradeRow } from "./store.js";
 import { Keeper } from "./keeper.js";
+import { KEEPER_RULES, validateShares } from "./fees.js";
 import { BLOCK_IDS } from "./layout.js";
+import { resolveGate, gateBalanceRaw, traderLists } from "./marks.js";
 
 const LAMPORTS = 1e9, RAW = 1e6;
 const SWAP2_HOOK = "swap2WithTransferHook";
@@ -77,12 +79,28 @@ export class Hookrz {
     const taken = this.store.findCoin(ticker);
     ensure(!taken, `$${ticker} is taken`, "TICKER_TAKEN");
     // A coin only launches with rules that are really enforced: hook rules by the deployed engine, curve rules by the
-    // DBC config. Keeper rules (crank) wait for keeper phase 2; never let a rule be dropped silently.
-    const notLive = stack.filter((x: any) => { const bl = byId[x.id]; return bl && ((bl.enforcedBy === "hook" && BLOCK_IDS[x.id] === undefined) || bl.enforcedBy === "crank"); });
+    // DBC config, keeper rules by the keeper (src/keeper.ts). Never let a rule be dropped silently.
+    const notLive = stack.filter((x: any) => { const bl = byId[x.id]; return bl && !KEEPER_RULES.has(x.id) && ((bl.enforcedBy === "hook" && BLOCK_IDS[x.id] === undefined) || bl.enforcedBy === "crank"); });
     ensure(!notLive.length, `${notLive.map((x: any) => byId[x.id].name).join(", ")} ${notLive.length > 1 ? "aren't" : "isn't"} enforced on chain yet. Remove ${notLive.length > 1 ? "them" : "it"}, or describe the rule in English instead.`, "RULE_NOT_LIVE");
+    const tithe = stack.find((x: any) => x.id === "tithe");
+    if (tithe) {
+      let to: PublicKey | null = null;
+      try { to = new PublicKey(String(tithe.params?.to ?? "")); } catch { /* checked below */ }
+      ensure(to && !to.equals(this.platform.publicKey), "Tithe needs the address it pays (params.to); it can't change after launch", "TITHE_ADDRESS_REQUIRED");
+      tithe.params.to = to.toBase58();
+    }
     const b = budget(stack);
     const creatorKey = body.creator ? new PublicKey(body.creator) : null;
     const buySol = Math.max(0, Number(meta.creatorBuySol ?? body.creatorBuySol ?? 0) || 0);
+    // Blocklist marks / Allowlist passes written at launch (body.marks: [{ owner, blocked?, pass? }]).
+    const ids = stack.map((x: any) => x.id);
+    const launchMarks = (Array.isArray(body.marks) ? body.marks : []).map((m: any) => {
+      let owner: PublicKey;
+      try { owner = new PublicKey(String(m.owner)); } catch { throw new AppError("BAD_REQUEST", `Not an address: ${m.owner}`); }
+      ensure(!m.blocked || ids.includes("blocklist"), "Blocked addresses need a Blocklist block in the stack", "NO_BLOCKLIST");
+      ensure(!m.pass || ids.includes("allowlist-phase"), "Passes need an Allowlist Phase block in the stack", "NO_ALLOWLIST");
+      return { owner, flags: (m.blocked ? 1 : 0) | (m.pass ? 2 : 0) };
+    }).filter((m: any) => m.flags);
     const parent = body.parent ? this.store.findCoin(String(body.parent)) : null;
     // Hookscript for a Custom block: { source } (compiled here) or { source, bytecode(base64) }.
     let script = body.script ?? null;
@@ -111,6 +129,9 @@ export class Hookrz {
       }
       ensure(script?.bytecode, "A Custom block needs its Hookscript: pass script.source (or draft one at /v1/hookscript/draft)", "SCRIPT_REQUIRED");
     } else script = null;
+    // Keeper rules spend shares of the creator's fees (the script's `payout` lines too): together at most 100%.
+    const shareError = validateShares(stack, script?.abi);
+    ensure(!shareError, shareError ?? "", "FEE_SHARES_INVALID");
     const preview = {
       instructions: LAUNCH_IXS.filter((_x: any, i: number) => b.hasHook || i !== 3).map((x: any) => ({ ...x })),
       txLimit: 1232, rentSol: b.rentSol, launchCostSol: FEES.launchCostSol, fees: FEES, signers: ["creator", "mint keypair"],
@@ -121,9 +142,13 @@ export class Hookrz {
     if (buySol > 0 && b.hasHook) {
       const { params, features } = curveConfig(stack, { thresholdSol: Number(body.curve?.thresholdSol ?? this.thresholdSol) });
       const fee = features.feeScheduler?.startBps ?? 100;
+      // Token Gate: the creator's own gate balance (unknown before the wallet connects). Allowlist Phase exempts the
+      // creator's launch buy (isCreator), like Snipe Shield and Anti-Bundle.
+      const gate = await resolveGate(this.chain, stack);
+      const creatorGate = !gate ? 0 : creatorKey ? Number(await gateBalanceRaw(this.chain, gate, creatorKey)) / 10 ** gate.decimals : Number.POSITIVE_INFINITY;
       const verdictAt = (sol: number) => {
         const tokens = Number(firstBuyRaw(params, BigInt(Math.round(sol * LAMPORTS)), fee)) / RAW;
-        return { tokens, v: evaluate(stack, { kind: "buy", amount: tokens, supply: SUPPLY, t: 0, slot: 0, hour: new Date().getUTCHours(), progress: 0, priceAfter: 0, windowOpenPrice: 0, srcBefore: 0, dstAfter: tokens, isCreatorSrc: false, isCreator: true, w: { lots: [], lastBuySlot: null, lastSellT: null, firstT: null }, slotBuys: 0, hourSold: 0, hasPass: true, gateBal: 0, blocked: false }) };
+        return { tokens, v: evaluate(stack, { kind: "buy", amount: tokens, supply: SUPPLY, t: 0, slot: 0, hour: new Date().getUTCHours(), progress: 0, priceAfter: 0, windowOpenPrice: 0, srcBefore: 0, dstAfter: tokens, isCreatorSrc: false, isCreator: true, w: { lots: [], lastBuySlot: null, lastSellT: null, firstT: null }, slotBuys: 0, hourSold: 0, hasPass: true, gateBal: creatorGate, blocked: launchMarks.some((m: any) => m.flags & 1 && creatorKey && m.owner.equals(creatorKey)) }) };
       };
       const at = verdictAt(buySol);
       let maxSol = buySol;
@@ -146,7 +171,9 @@ export class Hookrz {
       stack, creatorBuyLamports: BigInt(Math.round(buySol * LAMPORTS)), thresholdSol: Number(body.curve?.thresholdSol ?? this.thresholdSol),
       parentStack: parent && this.hook ? this.hook.stackPda(new PublicKey(parent.mint)) : null, parentAuthor: parent ? new PublicKey(parent.creator) : null,
       script: script?.bytecode ? Uint8Array.from(Buffer.from(script.bytecode, "base64")) : null,
+      scriptAbi: script?.abi ?? null,
       keys: reuse,
+      marks: launchMarks,
     });
     {
       this.pending.set(built.mint, {
@@ -271,8 +298,10 @@ export class Hookrz {
     const vest = normalize(c.stack).some((x: any) => x.id === "creator-vest") && this.hook?.kind === "hookrz";
     const stackAcc = vest ? await this.hook!.readStack(this.chain, new PublicKey(c.mint)).catch(() => null) : null;
     const creatorBase = stackAcc ? Number(stackAcc.creatorBase) / RAW : undefined;
+    // Blocklist / Allowlist Phase marks and the Token Gate balance of this trader, from chain.
+    const lists = await traderLists(this.chain, this.hook, c, ownerKey);
     return (tokens: number, priceAfter: number) =>
-      buildCtx({ kind: side, tokens, coin: c, owner, now: { slot: s.slot, unix: s.unix }, progress: s.progress, priceAfter, market, balance, wallet: w, creatorBase });
+      buildCtx({ kind: side, tokens, coin: c, owner, now: { slot: s.slot, unix: s.unix }, progress: s.progress, priceAfter, market, balance, wallet: w, creatorBase, ...lists });
   }
 
   /** Script ctx inputs for this trader and side (SPEC §8), from the Stack, Script and Wallet records on chain. */
@@ -489,7 +518,18 @@ export class Hookrz {
       stack, creatorInfo: { handle: c.creator.slice(0, 4) + "…" + c.creator.slice(-4) }, phase: c.stage === "graduated" ? "graduated" : "curve",
       families: [...new Set(stack.map((x: any) => byId[x.id]?.family))], budget: budget(stack), script: c.script ? { source: c.script.source ?? null, hasBytecode: !!c.script.bytecode } : null,
       launchSig: c.launch_sig, launchTs: c.launch_ts,
+      keeper: this.keeperSummary(c),
     };
+  }
+  /** The coin's fee routing and keeper totals for the coin page (null without keeper rules); full ledger: keeperLedger(). */
+  keeperSummary(c: CoinRow) {
+    if (!this.keeper.routing(c).keeper) return null;
+    const v = this.keeper.view(c, { actions: false });
+    return { routing: v.routing, totals: v.totals, rules: v.rules.map((r) => ({ key: r.key, label: r.label, sharePct: r.sharePct, paidSol: r.paidSol, burnedSol: r.burnedSol, burnedTokens: r.burnedTokens, owedSol: r.owedSol, note: r.note })), lastRound: v.lastRound };
+  }
+  /** GET /v1/coins/:mint/keeper */
+  keeperLedger(key: string) {
+    return this.keeper.view(this.coinOr404(key));
   }
   coins(q: any = {}) {
     const all = this.store.coins();

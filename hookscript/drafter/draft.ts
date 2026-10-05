@@ -24,6 +24,8 @@ export interface DraftOptions {
   llmUrl?: string;
   model?: string;
   maxAttempts?: number;
+  /** don't start another attempt after this many ms (HOOKSCRIPT_DEADLINE_MS; e.g. 40000 behind a 100 s proxy) */
+  deadlineMs?: number;
   trades?: number;
   seed?: number;
   /** test hook: replaces the Anthropic client */
@@ -211,7 +213,20 @@ const hpRefused = (reason: string): HoneypotReport => ({ ok: false, checkedWalle
 type Checked =
   | { ok: true; c: Extract<ReturnType<typeof compile>, { ok: true }>; z: FuzzReport; h: HoneypotReport }
   | { ok: false; stage: 'compile'; errors: Diag[]; warnings: Diag[] }
-  | { ok: false; stage: 'fuzz' | 'honeypot'; c: Extract<ReturnType<typeof compile>, { ok: true }>; z: FuzzReport; h: HoneypotReport; problem: string };
+  | { ok: false; stage: 'fuzz' | 'honeypot' | 'liveness'; c: Extract<ReturnType<typeof compile>, { ok: true }>; z: FuzzReport; h: HoneypotReport; problem: string };
+
+/** Sanity beyond safety: a rule that blocks (almost) every buy makes a coin nobody can buy (always a failure); a rule
+ *  with refusals that never refused any of the fuzzed trades probably has a logic bug (a model gets one retry). */
+function liveness(script: string, z: FuzzReport): { dead: string | null; idle: string | null } {
+  const b = z.byKind.buy;
+  const dead = b && b.attempts >= 50 && b.refused / b.attempts >= 0.99
+    ? `The rule refused ${Math.round((100 * b.refused) / b.attempts)}% of ${b.attempts.toLocaleString('en-US')} fuzzed buys: almost nobody could ever buy this coin. Make the condition match only the buys the rule is about.`
+    : null;
+  const idle = /\brefuse\b/.test(script) && z.refused === 0
+    ? `The rule never refused a single one of ${z.trades.toLocaleString('en-US')} fuzzed trades, so as written it does nothing. Check the refuse condition against the request (units, comparisons, state updates).`
+    : null;
+  return { dead, idle };
+}
 
 function check(script: string, opts: DraftOptions): Checked {
   const c = compile(script);
@@ -224,6 +239,8 @@ function check(script: string, opts: DraftOptions): Checked {
     if (h.bankRun) lines.push(`Bank run: holder number ${h.bankRun.failedAt} got stuck: "${h.bankRun.lastMessage}"`);
     return { ok: false, stage: 'honeypot', c, z, h, problem: `The honeypot check failed: holders can't always sell eventually.\n${lines.join('\n')}\nAdd a time-based escape so every holder can exit with nobody else trading.` };
   }
+  const live = liveness(script, z);
+  if (live.dead) return { ok: false, stage: 'liveness', c, z, h, problem: live.dead };
   return { ok: true, c, z, h };
 }
 
@@ -271,7 +288,10 @@ export async function draft(prompt: string, opts: DraftOptions = {}): Promise<Dr
   const attempts: DraftResult['attempts'] = [];
   let script = '';
   let last: Checked | null = null;
+  const t0 = Date.now();
+  const deadline = opts.deadlineMs ?? (Number(process.env.HOOKSCRIPT_DEADLINE_MS) || Infinity);
   for (let n = 1; n <= max; n++) {
+    if (n > 1 && Date.now() - t0 > deadline) { warnings.push('Ran out of time for another try.'); break; }
     try {
       script = n === 1 ? await provider.first(prompt) : await provider.retry(feedbackOf(last as Exclude<Checked, { ok: true }>, script));
     } catch (e) {
@@ -295,7 +315,17 @@ export async function draft(prompt: string, opts: DraftOptions = {}): Promise<Dr
     }
     last = check(script, opts);
     attempts.push({ n, ok: last.ok, problem: last.ok ? null : last.stage === 'compile' ? `compile: ${last.errors[0].message}` : `${last.stage}: ${last.problem.split('\n')[0]}` });
-    if (last.ok) break;
+    if (last.ok) {
+      const idle = liveness(script, last.z).idle;
+      if (idle && provider.name !== 'heuristic' && n < max) {
+        // compiles and is safe, but never refuses anything: give the model one more look
+        last = { ok: false, stage: 'liveness', c: last.c, z: last.z, h: last.h, problem: idle };
+        attempts[attempts.length - 1] = { n, ok: false, problem: `liveness: ${idle}` };
+        continue;
+      }
+      if (idle) warnings.push(idle);
+      break;
+    }
   }
   const base = { prompt, script, reviewed: false as const, provider: provider.name, model: provider.model, template: provider.template, title: script ? ruleTitle(script) : null, attempts, warnings };
   if (!last) return { ...base, ok: false, bytecodeHex: null, bytes: 0, ops: 0, cu: 0, fuzz: null, honeypot: null, errors: [{ message: 'No draft was produced', line: 1, col: 1 }], abi: null };

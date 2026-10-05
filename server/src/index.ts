@@ -39,3 +39,10 @@ await app.listen({ port: env.port, host: env.host });
 // never block the API or the indexer.
 svc.keeper.start();
 console.log(`hookrz server (${net}) on http://${env.host}:${env.port} · ${hookWhy} · keeper ${svc.keeper.running ? `every ${svc.keeper.opts.tickMs / 1000}s` : "off"}`);
+// The local drafter model reads the whole Hookscript spec on every call; warm its prefix cache now so the first
+// visitor's draft doesn't hit the tunnel's 100 s limit.
+if (process.env.HOOKSCRIPT_LLM_URL) {
+  svc.draft("No single sell over a quarter of your bag in your first 2h")
+    .then((d: any) => console.log(`drafter warm: ${d.provider}${d.model ? ` (${d.model})` : ""}`))
+    .catch((e: Error) => console.log(`drafter warm-up failed: ${e.message}`));
+}

@@ -61,11 +61,11 @@ export function buildApp(svc: Hookrz, o: { info?: any } = {}) {
     const b64 = String(req.body?.tx ?? req.body?.transaction ?? "");
     if (!b64) throw new AppError("BAD_REQUEST", "tx (base64) required");
     const r = await svc.sendTx(b64);
-    return json({ signature: r.signature, ok: r.ok, code: r.code, error: r.error, logs: r.ok ? [] : r.logs.slice(-20), slot: r.slot, explain: r.ok ? null : explainAny(svc, r) });
+    return json({ signature: r.signature, ok: r.ok, code: r.code, error: r.error, logs: r.ok ? [] : r.logs.slice(-20), slot: r.slot, explain: r.ok ? null : await explainAny(svc, r) });
   });
   app.get("/v1/tx/:sig", async (req: any, reply) => {
     const r = await svc.chain.record(req.params.sig);
-    return r ? json({ ...r, pre: undefined, post: undefined }) : reply.status(404).send({ error: "NOT_FOUND", message: "Unknown signature" });
+    return r ? json({ ...r, pre: undefined, post: undefined, explain: r.ok ? null : await explainAny(svc, r) }) : reply.status(404).send({ error: "NOT_FOUND", message: "Unknown signature" });
   });
 
   // token metadata the mint's URI names, and the coin image
@@ -115,7 +115,7 @@ export function buildApp(svc: Hookrz, o: { info?: any } = {}) {
   return app;
 }
 
-function explainAny(svc: Hookrz, r: any) {
+async function explainAny(svc: Hookrz, r: any) {
   const mints = new Set(r.accounts);
   const c = svc.store.coins().find((x) => mints.has(x.mint));
   if (!c) return null;

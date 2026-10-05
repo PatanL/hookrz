@@ -84,7 +84,10 @@ The quote token is native SOL.
 - Landed trades are classified from base-vault deltas: buy, sell or send. The launch transaction counts as a full-supply
   vault.
 - Refusals are decoded from the DBC swap instruction plus the custom error, then mapped to the block with the block's
-  message: `6001 → snipe-shield`, or `6128 → custom` with the script's own `Hookscript: …` reason.
+  message: `6001 → snipe-shield`, or `6128 → custom`. For Hookscript the engine logs the unformatted reason and a numbers
+  line (`0x17f0, reason id, arg, format kind, 0`). `scriptReason()` formats it with HOOKSCRIPT's `formatReason` over the
+  coin's own bytecode, so the text (non-ASCII included) comes from the script, not the log. `/v1/tx/send`,
+  `/v1/tx/:sig` (`explain`), the indexed trade and the trade ticket (`api.trade().message`) all carry the formatted text.
 - It also tracks:
   - holders, from post balances;
   - stage, price and progress, from the pool;
@@ -112,13 +115,13 @@ The quote token is native SOL.
   | `POST /v1/fork/airdrop`, `POST /v1/fork/warp` | fork only |
 
 ### E2E on the fork: `npm run test:e2e` (`tests/e2e-fork.test.ts`): 9 pass, 0 skipped
-The engine under test is the stable .so, sha256 `60c7ab77…`, with the Hookscript VM.
+The engine under test is the stable .so (the slim 145,704-byte build, with the Hookscript VM).
 
 Every trade is quoted by the JS engine first, then sent anyway with minOut = 1, so the chain gives its own verdict.
 For Hookscript coins the JS side is HOOKSCRIPT's TS interpreter. JS and chain matched on **all 40 trades**. The table is
 in `.runtime/e2e-results.json`.
 
-| Step | JS | Chain | Engine CU |
+| Step | JS | Chain | Engine CU (before the slim build; see the CU table for current figures) |
 |---|---|---|---|
 | 1. Fair Launch (snipe-shield, anti-bundle, rising-max, sniper-fee-burn), creator buy in the launch tx | ok | ok | — |
 | 2. ordinary buy (80% of the quoted max) | ok | ok | 3,355 |
@@ -127,7 +130,7 @@ in `.runtime/e2e-results.json`.
 | 4. warp 120 s, then sell half | ok | ok | 2,916 |
 | 4. a 2 SOL buy against the rising-max 0.5% cap | 6004 | 6004 | 3,865 |
 | 5. **King of the Hill** (`hookscript/examples` source compiled at launch): the king buys 0.5 SOL, a rival buys 0.05 | ok, ok | ok, ok | 9,263 / 8,617 |
-| 5. the king tries to sell | **6128** | **6128**, log `Hookscript: The king can't sell or send for 5h 58m: someone has to outbid you` | 11,883 |
+| 5. the king tries to sell | **6128** | **6128**; the engine logs the raw template plus the numbers, and the indexer formats them: “You're the king: no selling or sending for 5h 59m, unless someone outbids you” | — |
 | 5. the rival sells | ok | ok | 6,691 |
 | 5. the king sells after 6 h | ok | ok | 7,322 |
 | 5b. a long script, staged with write_script and sealed by init_stack, then a buy | ok | ok | 10,221 |
@@ -148,19 +151,19 @@ real DBC → Token-2022 → engine CPI chain. ENGINE's own table (worst case 19,
 
 | Block | Buy | Sell |
 |---|---|---|
-| snipe-shield | 2,642 | 2,654 |
-| anti-bundle | 2,692 | 2,684 |
-| max-wallet | 2,733 | 2,648 |
-| rising-max | 2,921 | 2,648 |
-| sandwich-guard | 3,992 | 4,089 |
-| sell-cap | 2,625 | 2,763 |
-| sell-cooldown | 3,991 | 4,061 |
-| hold-timer | 4,009 | 4,151 |
-| circuit-breaker | 4,441 | 4,466 |
-| trading-hours | 2,636 | 2,663 |
-| lock-in | 2,936 | 3,756 (6015 refusal) |
-| creator-vest | 2,649 | 2,676 |
-| 6 slots: sandwich, cooldown, hold, breaker, sell-cap, lock-in | **6,398** | **6,857** |
+| snipe-shield | 1,180 | 1,204 |
+| anti-bundle | 1,242 | 1,250 |
+| max-wallet | 1,271 | 1,198 |
+| rising-max | 1,459 | 1,198 |
+| sandwich-guard | 2,102 | 2,212 |
+| sell-cap | 1,163 | 1,313 |
+| sell-cooldown | 2,101 | 2,184 |
+| hold-timer | 2,119 | 2,274 |
+| circuit-breaker | 2,788 | 2,825 |
+| trading-hours | 1,174 | 1,213 |
+| lock-in | 1,275 | 1,551 (6015 refusal) |
+| creator-vest | 1,202 | 1,241 |
+| 6 slots: sandwich, cooldown, hold, breaker, sell-cap, lock-in | **4,118** | **4,013 (6015 refusal)** |
 
 Opening a Wallet record inside a buy (`open_wallet`, top level) costs about 4,700 CU on top.
 

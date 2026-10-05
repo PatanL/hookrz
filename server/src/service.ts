@@ -401,7 +401,7 @@ export class Hookrz {
         if (kind === "buy") sol = Number(amount0) / LAMPORTS;
         else tokens = Number(amount0) / RAW;
       }
-      const { by, msg } = this.explain(c, r, !!hookrz);
+      const { by, msg } = await this.explain(c, r, !!hookrz);
       rows.push(this.row(r, c, { kind, wallet, tokens, sol, t, priceBefore, priceAfter: priceBefore, ok: false, code: r.code, by, msg, verdicts: by ? verdictsFor(by) : null }));
     }
     for (const row of rows) {
@@ -421,15 +421,12 @@ export class Hookrz {
   }
 
   /** Which block refused, from the custom error code (and the engine's log line). */
-  explain(c: CoinRow, r: TxRecord, hookrz: boolean) {
+  async explain(c: CoinRow, r: TxRecord, hookrz: boolean) {
     const code = r.code;
     const engineLog = r.logs.filter((l) => l.startsWith("Program log:") && !/Instruction:/.test(l)).map((l) => l.slice(13)).find((l) => /refus|limit|window|cap|closed|cooldown|settl|breaker|custom|wallet/i.test(l)) ?? null;
     if (!hookrz) return { by: null, msg: engineLog ?? `Refused by the transfer hook (${code})` };
     const block = BLOCKS.find((b: any) => b.code === code);
-    if (code === 6128) {
-      const hs = r.logs.find((l) => l.startsWith("Program log: Hookscript"))?.slice(13).replace(/^Hookscript:\s*/, "");
-      return { by: "custom", msg: hs ?? engineLog ?? "Refused by the coin's custom rule" };
-    }
+    if (code === 6128) return { by: "custom", msg: await this.scriptReason(c, r.logs) };
     if (block) {
       const slot = normalize(c.stack).find((s: any) => s.id === block.id);
       return { by: block.id, msg: block.error?.(slot?.params ?? {}, {}) ?? engineLog };
@@ -437,6 +434,29 @@ export class Hookrz {
     return { by: null, msg: code != null ? `${code} · ${ERR_NAMES[code] ?? "Custom"}${engineLog ? `: ${engineLog}` : ""}` : engineLog };
   }
 
+  /**
+   * A Hookscript refusal as the trader should read it. The engine logs the raw reason template and, on the next line,
+   * the numbers (sol_log_64: 6128, reason id, arg, format kind, 0). The message is formatted here with HOOKSCRIPT's
+   * formatReason over the coin's own bytecode, so the text (non-ASCII included) comes from the script, not the log.
+   */
+  async scriptReason(c: CoinRow, logs: string[]) {
+    const at = logs.findIndex((l) => l.startsWith("Program log: Hookscript"));
+    const template = at >= 0 ? logs[at].slice(13).replace(/^Hookscript:\s*/, "") : null;
+    const fault = logs.find((l) => /HookscriptFault/.test(l))?.replace(/^Program log:\s*/, "");
+    const NUMS = /^Program log: 0x([0-9a-f]+), 0x([0-9a-f]+), 0x([0-9a-f]+), 0x([0-9a-f]+), 0x([0-9a-f]+)$/i;
+    const nums = logs.slice(Math.max(0, at)).map((l) => NUMS.exec(l)).find((m) => m && parseInt(m[1], 16) === 6128) ?? null;
+    const code = c.script?.bytecode ? Uint8Array.from(Buffer.from(c.script.bytecode, "base64")) : null;
+    if (nums && code) {
+      const lib = await hookscript();
+      if (lib?.formatReason) {
+        try {
+          return lib.formatReason(code, parseInt(nums[2], 16), BigInt.asIntN(64, BigInt(`0x${nums[3]}`))) as string;
+        } catch { /* fall through to the template */ }
+      }
+    }
+    if (template) return template.replace(/\{\}/g, "…");
+    return fault ?? "Refused by the coin's custom rule";
+  }
   private tradeEvent(c: CoinRow, t: TradeRow) {
     return { type: "trade", mint: c.mint, ticker: c.ticker, t: t.t, kind: t.kind, amount: t.tokens, sol: t.sol, ok: t.ok, by: t.by, code: t.code, msg: t.msg, verdicts: t.verdicts ?? [], wallet: t.wallet, sig: t.sig, at: t.ts * 1000, slot: t.slot };
   }

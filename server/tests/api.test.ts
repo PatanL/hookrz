@@ -165,6 +165,19 @@ test("a hand-written script in the Custom slot is recompiled and must pass the h
   const sub = await post("/v1/launch/submit", { mint: good.body.mint, signed: good.body.transactions.map((t: any) => signB64(t.base64, who)) });
   assert.equal(sub.status, 200, JSON.stringify(sub.body));
   assert.ok((await get("/v1/coins/CROWN")).body.script?.source?.includes("King of the Hill"));
+  // the king's sell, sent anyway: /v1/tx/send and /v1/tx/:sig carry the formatted reason (what the trade ticket shows)
+  const buy = await post("/v1/trade/prepare", { mint: "CROWN", side: "buy", amount: 0.5, wallet: who.publicKey.toBase58() });
+  assert.equal((await post("/v1/tx/send", { tx: signB64(buy.body.transaction, who) })).body.ok, true);
+  const held = (await get("/v1/coins/CROWN/holders")).body.find((h: any) => h.wallet === who.publicKey.toBase58());
+  const sell = await post("/v1/trade/prepare", { mint: "CROWN", side: "sell", amount: Math.floor(Number(held.raw) / 2e6), wallet: who.publicKey.toBase58(), minOut: "1" });
+  const refused = (await post("/v1/tx/send", { tx: signB64(sell.body.transaction, who) })).body;
+  assert.equal(refused.code, 6128);
+  assert.equal(refused.explain.by, "custom");
+  assert.match(refused.explain.msg, /^You're the king: no selling or sending for 5h 59m, unless someone outbids you$/);
+  const rec = (await get(`/v1/tx/${refused.signature}`)).body;
+  assert.equal(rec.explain.msg, refused.explain.msg);
+  const indexed = (await get("/v1/coins/CROWN/trades")).body.find((t: any) => t.sig === refused.signature);
+  assert.equal(indexed.msg, refused.explain.msg);
 });
 
 test("validate, simulate, creator, health, blocks", async () => {

@@ -11,7 +11,9 @@ import { signB64, type Hookrz } from "../src/service.js";
 import { snapshot } from "../src/market.js";
 import { liveHookProgram, HookrzEngine } from "../src/hook.js";
 import { hookscript } from "../src/rules.js";
-import { RUNTIME } from "../src/env.js";
+import { RUNTIME, ROOT } from "../src/env.js";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { ForkChain } from "../src/fork.js";
 import type { TxRecord } from "../src/chain.js";
 
@@ -146,27 +148,8 @@ test("4. warp the clock past the snipe window: a sell lands; rising-max still ca
   results.steps.sellAfterWarp = { sig: r.signature, tokens, risingMaxRefusal: big.r.signature };
 });
 
-const KOTH_SRC = `rule "King of the Hill"
-global king: key
-global bar: num
-global crowned_at: time
-
-payout 50% to king
-
-on buy {
-  let need = max(fade(bar, over: 6h, since: crowned_at), 1)
-  if amount > need {
-    set king = buyer
-    set bar = amount
-    set crowned_at = clock.now
-  }
-}
-
-on sell, send {
-  refuse if wallet == king and since(crowned_at) < 6h
-    because "The king can't sell or send for {6h - since(crowned_at)}: someone has to outbid you"
-}
-`;
+// hookscript/examples/king-of-the-hill.hs, the script the site suggests
+const KOTH_SRC = readFileSync(resolve(ROOT, "hookscript/examples/king-of-the-hill.hs"), "utf8");
 
 test("5. a Hookscript King-of-the-Hill coin refuses the king's sell", async (t) => {
   const lib = await hookscript();
@@ -182,7 +165,7 @@ test("5. a Hookscript King-of-the-Hill coin refuses the king's sell", async (t) 
   assert.ok(crown.r.ok, `${crown.r.error} ${crown.r.logs.slice(-4).join(" | ")}`);
   const small = await trade("5 koth small", rival, "rival", "KOTH", "buy", 0.05);
   assert.ok(small.r.ok, `${small.r.error}`);
-  chain.warp(60);
+  chain.warp(5); // the king tries to sell seconds after the coronation
   const held = svc.holders("KOTH").find((h: any) => h.wallet === king.publicKey.toBase58())!;
   const dump = await trade("5 koth king sells", king, "king", "KOTH", "sell", Math.floor(Number(held.raw) / 1e6 / 2));
   assert.equal(dump.q.code, 6128, "the Hookscript interpreter refuses the king's sell");
@@ -190,8 +173,13 @@ test("5. a Hookscript King-of-the-Hill coin refuses the king's sell", async (t) 
   await svc.idle();
   const indexed = svc.trades("KOTH").find((x: any) => x.sig === dump.r.signature)!;
   assert.equal(indexed.by, "custom");
-  assert.match(String(indexed.msg), /king/i, "the refusal carries the script's own reason");
-  assert.match(String(dump.q.message), /king/i, "so does the quote");
+  // the engine logs the raw template + the numbers; the indexer formats them with the coin's own bytecode
+  assert.ok(dump.r.logs.some((l) => /Hookscript: .*\{\}/.test(l)), "engine logs the unformatted template");
+  assert.match(String(indexed.msg), /^You're the king: no selling or sending for 5h 59m, unless someone outbids you$/, "the refusal reads the formatted time");
+  assert.doesNotMatch(String(indexed.msg), /\{\}/);
+  assert.match(String(dump.q.message), /for 5h 59m/, "so does the quote");
+  const tx = await svc.chain.record(dump.r.signature);
+  assert.match(String((await svc.explain(svc.store.findCoin("KOTH")!, tx!, true)).msg), /for 5h 59m/);
   const ok = await trade("5 koth rival sells", rival, "rival", "KOTH", "sell", 1000);
   assert.ok(ok.r.ok, `${ok.r.error}`);
   chain.warp(6 * 3600 + 60);

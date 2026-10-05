@@ -242,7 +242,7 @@ export function mountTicket(el, coin) {
           const b = res.code ? Object.values(byId).find((x) => x.code === res.code) : null;
           cf.innerHTML = `<div class="cf-done"><span class="eyebrow">Refused</span>
             <h3 class="cf-h">${res.code ? `${hex(res.code)} · ${esc(errName(res.code))}` : 'Not sent'}</h3>
-            <p class="muted">${esc(b ? `${b.name}: ${b.error?.(coin.stack.find((s) => s.id === b.id)?.params ?? {}, {}) ?? ''}` : res.error ?? 'The transaction did not go through.')} Only the network fee was spent.</p>
+            <p class="muted">${esc(b ? `${b.name}: ${res.message ?? b.error?.(coin.stack.find((s) => s.id === b.id)?.params ?? {}, {}) ?? ''}` : res.message ?? res.error ?? 'The transaction did not go through.')} Only the network fee was spent.</p>
             <button class="btn btn-glass btn-lg cf-go" id="cfDone">Close</button></div>`;
           cf.querySelector('#cfDone').onclick = close;
           return;

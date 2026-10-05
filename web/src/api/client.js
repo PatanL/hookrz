@@ -243,7 +243,8 @@ export const api = {
       const { h, address } = await walletHandle();
       const P = await live('/v1/trade/prepare', { mint: ticker, side, amount, wallet: address, slippageBps });
       const { sig, rec } = await signSendWait(h, P.transaction);
-      return { ok: rec.ok, signature: sig, code: rec.code ?? null, error: rec.error ?? null, slot: rec.slot, openedRecords: P.openedRecords ?? [] };
+      // message: the refusal as the trader reads it (a Hookscript reason is formatted by the server from the coin's bytecode)
+      return { ok: rec.ok, signature: sig, code: rec.code ?? null, error: rec.error ?? null, message: rec.explain?.msg ?? null, by: rec.explain?.by ?? null, slot: rec.slot, openedRecords: P.openedRecords ?? [] };
     }
     await wait(1300 + Math.random() * 700);
     return { ok: true, signature: fakeKey(Date.now() % 99991, ''), code: null, error: null, demo: true };

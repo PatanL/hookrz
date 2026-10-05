@@ -4,19 +4,19 @@
 import { avatar } from './avatar.js';
 import { byId } from '../data/blocks.js';
 import { esc, usd } from '../core/format.js';
-import { handleOf, miniStack, ruleName } from './coin-shared.js';
+import { handleOf, miniStack } from './coin-shared.js';
 
-const name = (id) => (byId[id] ? ruleName(byId[id]) : id);
+const name = (id) => byId[id]?.name ?? id;
 
 function diffChips(n, isRoot) {
-  if (isRoot) return '<span class="dchip root">Original rules</span>';
+  if (isRoot) return '<span class="dchip root">Original stack</span>';
   const { added, removed, tuned } = n.diff;
   const out = [
     ...added.map((id) => `<span class="dchip add" data-tip="Added ${esc(name(id))}">+${esc(name(id))}</span>`),
     ...removed.map((id) => `<span class="dchip rem" data-tip="Removed ${esc(name(id))}">−${esc(name(id))}</span>`),
-    ...tuned.map((id) => `<span class="dchip tune" data-tip="Changed the settings of ${esc(name(id))}">~${esc(name(id))}</span>`),
+    ...tuned.map((id) => `<span class="dchip tune" data-tip="Retuned ${esc(name(id))}">~${esc(name(id))}</span>`),
   ];
-  return out.length ? out.join('') : '<span class="dchip same">Same rules, as is</span>';
+  return out.length ? out.join('') : '<span class="dchip same">Same stack, as is</span>';
 }
 
 /**

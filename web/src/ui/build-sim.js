@@ -1,4 +1,4 @@
-// Launch page, Customize: "Simulate launch" — the stack vs no rules against the same seeded crowd.
+// Build page: "Simulate launch" — the stack vs no rules against the same seeded crowd.
 // KPI comparison, a market-cap chart with both series, refusals by block, the crowd table
 // and sample refused transfers. The chart is drawn at the container's real pixel width.
 import { ARCHETYPES, SUPPLY, fmtSol } from '../engine/sim.js';
@@ -24,7 +24,7 @@ const pct = (x, d = 1) => `${(x * 100).toFixed(d)}%`;
 const sol = (x) => `${x > 0 ? '+' : ''}${fmtSol(x)}`;
 
 export function secHead(n, eyebrow, title, lede) {
-  return `${n ? `<div class="sec-num" aria-hidden="true">${voxelSVG(n, { cell: 5, gap: 0.8, depth: 0.36, glow: true })}</div>` : ''}
+  return `<div class="sec-num" aria-hidden="true">${voxelSVG(n, { cell: 5, gap: 0.8, depth: 0.36, glow: true })}</div>
     <div class="sec-txt"><span class="eyebrow">${eyebrow}</span><h2>${title}</h2><p class="lede">${lede}</p></div>`;
 }
 
@@ -32,8 +32,8 @@ export function simHTML(S, currentSig) {
   const { res, busy, seed, err } = S.sim;
   const stale = res && S.sim.sig !== currentSig;
   return `
-  <div class="sec-head nonum">
-    ${secHead(null, 'Simulation', 'Simulate launch', `Run the stack against a seeded crowd of ${WALLETS} wallets for the first six hours. The same crowd trades the same curve with no rules, side by side. Every transfer goes through the engine's reference code.`)}
+  <div class="sec-head">
+    ${secHead('02', 'Simulation', 'Simulate launch', `Run the stack against a seeded crowd of ${WALLETS} wallets for the first six hours. The same crowd trades the same curve with no rules, side by side. Every transfer goes through the engine's reference code.`)}
     ${res ? `<div class="sim-ctl">
       <span class="crowd-id"><span class="pixel">Crowd</span><b class="mono">#${String(seed).padStart(4, '0')}</b></span>
       <button class="btn btn-glass" data-act="crowd" data-fk="sim-crowd" ${busy ? 'disabled' : ''} title="Same stack, a different seeded crowd">New crowd</button>

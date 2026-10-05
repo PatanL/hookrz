@@ -7,10 +7,9 @@ import { BLOCKS, byId, ENGINE } from '../data/blocks.js';
 import { COINS, coinBy, stats, childrenOf, CREATORS, fakeKey, SOL_USD, curveMcapSol } from '../data/coins.js';
 import { budget, evaluate, normalize } from '../engine/engine.js';
 import { simulate as runSim, Curve, SUPPLY, rng } from '../engine/sim.js';
-import { feeSplit, feeRouting, lockedLpPctOf } from '../engine/fees.js';
 
 const ENV_API = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE) || '';
-export const API_BASE = ENV_API === 'same-origin' ? (typeof location !== 'undefined' ? location.origin : '') : ENV_API.replace(/\/$/, '');
+export const API_BASE = ENV_API.replace(/\/$/, '');
 export const MODE = API_BASE ? 'live' : 'demo';
 const wait = (ms = 120) => new Promise((r) => setTimeout(r, ms));
 const LS = 'hookrz:launches';
@@ -155,8 +154,8 @@ export const api = {
     if (MODE === 'live') return live('/v1/stacks');
     const list = await api.coins();
     return list.filter((c) => !c.parent).map((c) => ({ ...c, family: [c, ...descendantsOf(c.ticker, list)] }))
-      .map((c) => ({ ...c, remixCount: c.family.length - 1 }))
-      .sort((a, b) => b.remixCount - a.remixCount || b.vol24Usd - a.vol24Usd);
+      .map((c) => ({ ...c, remixCount: c.family.length - 1, royaltiesSol: c.family.filter((x) => x.parent === c.ticker).reduce((a, x) => a + x.vol24Usd / SOL_USD * 0.01 * 0.10, 0) })) // one level up only
+      .sort((a, b) => b.remixCount - a.remixCount || b.royaltiesSol - a.royaltiesSol);
   },
 
   async lineage(ticker) {
@@ -194,29 +193,23 @@ export const api = {
     return hs.checkSource(source);
   },
 
-  /**
-   * marks: Blocklist / Allowlist Phase entries written in the launch transaction, [{ owner, blocked?, pass? }] (3 fit
-   * beside a creator buy). The answer's curve.feeSplit is the fee routing the coin's DBC config gets (web/src/engine/fees.js).
-   */
-  async prepareLaunch({ meta, stack, curve = {}, creator = 'DEMO', parent = null, mint = null, marks = [] }) {
-    if (MODE === 'live') return live('/v1/launch/prepare', { meta, stack, curve, creator: creator === 'DEMO' ? null : creator, parent, mint, script: scriptOf(stack), marks: marksOut(marks) });
+  async prepareLaunch({ meta, stack, curve = {}, creator = 'DEMO', parent = null, mint = null }) {
+    if (MODE === 'live') return live('/v1/launch/prepare', { meta, stack, curve, creator: creator === 'DEMO' ? null : creator, parent, mint, script: scriptOf(stack) });
     await wait(500);
-    const abi = await scriptAbiOf(stack);
     const b = budget(stack);
     const ixs = LAUNCH_IXS.filter((x, i) => b.hasHook || i !== 3).map((x) => ({ ...x }));
     if (!b.hasHook) ixs[0] = { ...ixs[0], note: 'Extensions: MetadataPointer + TokenMetadata. No transfer hook: this stack has no Hook blocks.' };
     const bytes = 900 + normalize(stack).length * 26 + (b.hasHook ? 140 : 0);
-    const nMarks = marksOut(marks).length;
-    return { mint: fakeKey(Date.now() % 100000, 'hk'), instructions: ixs, txBytes: bytes + nMarks * 70, txLimit: 1232, rentSol: b.rentSol, launchCostSol: FEES.launchCostSol, fees: FEES, signers: ['creator', 'mint keypair'], curve: { feeSplit: feeSplit(stack, abi) }, marks: nMarks };
+    return { mint: fakeKey(Date.now() % 100000, 'hk'), instructions: ixs, txBytes: bytes, txLimit: 1232, rentSol: b.rentSol, launchCostSol: FEES.launchCostSol, fees: FEES, signers: ['creator', 'mint keypair'] };
   },
 
   /** Demo "launch": nothing is sent; the coin is saved in this browser so the rest of the site shows it. */
-  async submitLaunch({ meta, stack, parent = null, prepared, marks = [] }) {
+  async submitLaunch({ meta, stack, parent = null, prepared }) {
     if (MODE === 'live') {
-      // Rebuild for the connected wallet (same mint, fresh blockhash, parent stack and launch marks attached), then the
-      // wallet signs and sends each transaction in order; the server confirms and indexes the coin.
+      // Rebuild for the connected wallet (same mint, fresh blockhash, parent stack attached), then the wallet
+      // signs and sends each transaction in order; the server confirms and indexes the coin.
       const { h, address } = await walletHandle();
-      const P = await live('/v1/launch/prepare', { meta, stack, creator: address, parent, mint: prepared?.mint ?? null, script: scriptOf(stack), marks: marksOut(marks) });
+      const P = await live('/v1/launch/prepare', { meta, stack, creator: address, parent, mint: prepared?.mint ?? null, script: scriptOf(stack) });
       const signatures = [];
       for (const t of P.transactions) {
         const { sig, rec } = await signSendWait(h, t.base64);
@@ -229,10 +222,8 @@ export const api = {
     const coin = {
       ticker: meta.ticker.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10), name: meta.name, creator: 'you', minutesAgo: 0, progress: 0.002, parent,
       desc: meta.desc || '', stack: normalize(stack), local: true, image: meta.image ?? null,
-      // the wallet that signed the launch (it edits the coin's lists), when it was launched, and the lists written at launch
-      creatorWallet: prepared?.creator ?? null, launchTs: Math.floor(Date.now() / 1000), marks: marksOut(marks),
       stats: { mint: null, // nothing went on chain in this mode, so there is no contract address to show
-       mcapUsd: curveMcapSol(0.002) * SOL_USD, vol24Usd: 0, change24: 0, holders: 1, trades: 1, checked: 1, refused: 0, remixes: 0 },
+       mcapUsd: curveMcapSol(0.002) * SOL_USD, vol24Usd: 0, change24: 0, holders: 1, trades: 1, checked: 1, refused: 0, remixes: 0, royaltiesSol: 0 },
     };
     const list = localLaunches().filter((c) => c.ticker !== coin.ticker);
     try { localStorage.setItem(LS, JSON.stringify([coin, ...list].slice(0, 20))); } catch { /* private mode: coin lives for this page only */ }
@@ -259,93 +250,12 @@ export const api = {
     return { ok: true, signature: fakeKey(Date.now() % 99991, ''), code: null, error: null, demo: true };
   },
 
-  /** GET /v1/health: { ok, mode: fork | devnet | mainnet, slot, unix, … }. Demo: nothing is on a chain, so mode is null. */
-  health() {
-    if (MODE !== 'live') return Promise.resolve({ ok: true, mode: null, unix: Math.floor(Date.now() / 1000) });
-    healthP ??= live('/v1/health').catch((e) => { healthP = null; throw e; });
-    return healthP;
-  },
-
-  /**
-   * A coin's fee routing and keeper ledger (GET /v1/coins/:mint/keeper): routing, totals, rules[{ key, id, label,
-   * sharePct, kind, to, paidSol, burnedSol, burnedTokens, owedSol, note }], creator, actions[{ kind, rule, ok, sig, dest,
-   * lamports, tokens, detail, at }], lastRound. Demo: the same shape for a coin launched in this browser, with nothing
-   * claimed (nothing it does reaches a chain, so there is nothing to pay).
-   */
-  async coinKeeper(ticker) {
-    if (MODE === 'live') return live(`/v1/coins/${encodeURIComponent(ticker)}/keeper`);
-    await wait(60);
-    const c = allCoins().find((x) => x.ticker === ticker);
-    if (!c) return null;
-    const R = feeRouting(c.stack);
-    const zero = { accruedSol: 0, paidSol: 0, burnedSol: 0, burnedTokens: 0, owedSol: 0, lastAt: null, note: null };
-    return {
-      mint: null, ticker, keeper: R.keeper, platform: null,
-      routing: {
-        creatorTradingFeePct: R.creatorTradingFeePercentage, platformClaimPct: 100 - R.creatorTradingFeePercentage, hookrzPct: 50,
-        routedPct: R.shareBps / 200, keeperShareOfCreatorPct: R.shareBps / 100, creatorPassThrough: !!R.sniper,
-        sniper: R.sniper ? { startPct: R.sniper.startBps / 100, endPct: 1, seconds: R.sniper.seconds } : null,
-        afterGraduation: { partnerLockedLpPct: R.partnerLockedLpPct, lockedLpPct: lockedLpPctOf(c.stack) },
-      },
-      totals: { claimedSol: 0, keptSol: 0, paidSol: 0, burnedSol: 0, burnedTokens: 0, owedSol: 0, creatorPaidSol: 0, creatorOwedSol: 0 },
-      rules: [
-        ...(R.sniper ? [{ key: 'sniper-fee-burn', id: 'sniper-fee-burn', label: byId['sniper-fee-burn'].name, sharePct: null, kind: 'burn', mode: null, to: null }] : []),
-        ...R.shares.map((x) => ({ key: x.key, id: x.id, label: x.label, sharePct: x.bps / 100, kind: x.kind, mode: x.mode ?? null, to: x.id === 'tithe' ? x.params?.to || null : x.to ?? null })),
-      ].map((r) => ({ ...r, ...zero })),
-      creator: { wallet: c.creatorWallet ?? null, ...zero }, state: {}, lastRound: null, lastClaimAt: null, lastError: null, actions: [],
-    };
-  },
-
-  /** GET /v1/keeper: the public keeper's loop and every keeper coin's totals. Demo: no keeper runs in a browser. */
-  async keeper() {
-    if (MODE === 'live') return live('/v1/keeper');
-    return { running: false, intervalMs: 0, lastTick: null, platform: null, coins: [], actions: [] };
-  },
-
-  /** The coin's Blocklist and Allowlist passes: [{ owner, blocked, pass, flags }] (live: read from chain). */
-  async marks(ticker) {
-    if (MODE === 'live') return live(`/v1/coins/${encodeURIComponent(ticker)}/marks`);
-    await wait(60);
-    const c = localLaunches().find((x) => x.ticker === ticker);
-    return (c?.marks ?? []).map((m) => ({ owner: m.owner, blocked: !!m.blocked, pass: !!m.pass, flags: (m.blocked ? 1 : 0) | (m.pass ? 2 : 0) }));
-  },
-
-  /**
-   * Unsigned set_mark transactions for the creator (POST /v1/coins/:mint/marks/prepare): body { creator, marks:
-   * [{ owner, blocked?, pass? }] } (an omitted field keeps the owner's bit) → { marks (changed), blocklistOpen,
-   * transactions[{ label, bytes, base64 }] }.
-   */
-  async prepareMarks({ ticker, creator, marks }) {
-    if (MODE === 'live') return live(`/v1/coins/${encodeURIComponent(ticker)}/marks/prepare`, { creator, marks });
-    await wait(150);
-    return demoMarks(ticker, creator, marks, { write: false });
-  },
-
-  /** The creator edits the lists: prepare → the wallet signs and sends each transaction → confirmed. Demo: saved in this browser. */
-  async setMarks({ ticker, marks }) {
-    if (MODE === 'live') {
-      const { h, address } = await walletHandle();
-      const P = await live(`/v1/coins/${encodeURIComponent(ticker)}/marks/prepare`, { creator: address, marks });
-      const signatures = [];
-      for (const t of P.transactions) {
-        const { sig, rec } = await signSendWait(h, t.base64);
-        if (!rec.ok) throw Object.assign(new Error(`The change was refused on chain (${rec.code ?? rec.error}). Nothing after it was sent.`), { code: rec.code ?? null, signatures });
-        signatures.push(sig);
-      }
-      return { ok: true, signatures, marks: P.marks, blocklistOpen: P.blocklistOpen };
-    }
-    const w = await import('../wallet/wallet.js');
-    await w.connect();
-    await wait(900);
-    return demoMarks(ticker, w.address, marks, { write: true });
-  },
-
   async creator(handle) {
     if (MODE === 'live') return live(`/v1/creators/${handle}`);
     const list = await api.coins();
     const mine = list.filter((c) => c.creator === handle);
     const remixesOfMine = list.filter((c) => mine.some((m) => m.ticker === c.parent) && c.creator !== handle);
-    return { handle, coins: mine, remixesOfMine, claimableSol: mine.reduce((a, c) => a + c.vol24Usd / SOL_USD * 0.005, 0) };
+    return { handle, coins: mine, remixesOfMine, claimableSol: mine.reduce((a, c) => a + c.vol24Usd / SOL_USD * 0.005, 0), royaltiesSol: remixesOfMine.reduce((a, c) => a + c.vol24Usd / SOL_USD * 0.001, 0) };
   },
 
   /** Live stream (WS in live mode). Demo: replays the coin's simulated log on a timer. Returns an unsubscribe fn. */
@@ -388,65 +298,4 @@ export function diffStacks(a, b) {
 function scriptOf(stack) {
   const src = stack?.find((s) => s.id === 'custom')?.params?.script;
   return src ? { source: src } : null;
-}
-
-let healthP = null;
-
-/** Launch marks as the server takes them: one per owner (a wallet both blocked and given a pass is one mark). */
-function marksOut(list) {
-  const by = new Map();
-  for (const m of list ?? []) {
-    const owner = String(m.owner ?? '').trim();
-    if (!owner) continue;
-    const cur = by.get(owner) ?? { owner };
-    if (m.blocked) cur.blocked = true;
-    if (m.pass) cur.pass = true;
-    by.set(owner, cur);
-  }
-  return [...by.values()].filter((m) => m.blocked || m.pass);
-}
-
-/** The Hookscript ABI the server will compile from the Custom block (its payout lines change the fee split). */
-async function scriptAbiOf(stack) {
-  const src = scriptOf(stack)?.source;
-  if (!src) return null;
-  try { const hs = await import('../hookscript/hs.js'); const c = await hs.compileSource(src); return c?.ok ? c.abi ?? null : null; } catch { return null; }
-}
-
-/** Whether a Blocklist can still change (the engine's rule): open in the launch slot, then until `lockAt`. */
-export function blocklistOpen(coin, unixNow = Math.floor(Date.now() / 1000)) {
-  const s = normalize(coin?.stack ?? []).find((x) => x.id === 'blocklist');
-  if (!s || coin.phase === 'graduated' || coin.graduated) return false;
-  const at = s.params.lockAt;
-  if (at === 'at graduation') return true;
-  if (at === 'after 24h') return coin.launchTs != null && unixNow - coin.launchTs < 86400;
-  return false; // immediately: only the launch transaction could write it
-}
-
-/** Demo marks: the same checks as the server's prepare, applied to the coin saved in this browser. */
-function demoMarks(ticker, creator, marks, { write }) {
-  const all = localLaunches();
-  const c = all.find((x) => x.ticker === ticker);
-  const fail = (code, message, status = 400) => { throw Object.assign(new Error(message), { code, status }); };
-  if (!c) fail('NOT_FOUND', `No coin ${ticker}`, 404);
-  if (!creator || creator !== c.creatorWallet) fail('NOT_CREATOR', "Only the coin's creator can edit its blocklist and passes");
-  const ids = c.stack.map((x) => x.id);
-  const open = blocklistOpen(shapeCoin(c));
-  const cur = new Map((c.marks ?? []).map((m) => [m.owner, { ...m }]));
-  const changed = [];
-  for (const m of marks ?? []) {
-    if (m.blocked !== undefined && !ids.includes('blocklist')) fail('NO_BLOCKLIST', 'This coin has no Blocklist');
-    if (m.pass !== undefined && !ids.includes('allowlist-phase')) fail('NO_ALLOWLIST', 'This coin has no Allowlist Phase');
-    const was = cur.get(m.owner) ?? { owner: m.owner, blocked: false, pass: false };
-    const next = { owner: m.owner, blocked: m.blocked ?? !!was.blocked, pass: m.pass ?? !!was.pass };
-    if (next.blocked !== !!was.blocked && !open) fail('BLOCKLIST_FROZEN', "The blocklist is frozen: it can't change any more");
-    if (next.blocked === !!was.blocked && next.pass === !!was.pass) continue;
-    cur.set(m.owner, next);
-    changed.push({ owner: m.owner, flags: (next.blocked ? 1 : 0) | (next.pass ? 2 : 0) });
-  }
-  if (write) {
-    c.marks = [...cur.values()].filter((m) => m.blocked || m.pass);
-    try { localStorage.setItem(LS, JSON.stringify(all)); } catch { /* private mode */ }
-  }
-  return { mint: null, ticker, marks: changed, blocklistOpen: open, transactions: [] };
 }

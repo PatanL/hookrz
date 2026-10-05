@@ -1,6 +1,7 @@
 // The block details drawer: full spec, live settings, the rendered error, and a tester that runs
 // the reference engine (engine.evaluate) against one transfer. Non-hook blocks get an explainer
 // of what the curve, keeper or mint does instead.
+import { cube } from './icons.js';
 import { byId, defaults, hex, errName, ENFORCERS, familyOf } from '../data/blocks.js';
 import { evaluate, largestAllowed } from '../engine/engine.js';
 import { SUPPLY } from '../engine/sim.js';
@@ -8,11 +9,8 @@ import { FEES } from '../api/contract.js';
 import { api } from '../api/client.js';
 import { esc } from '../core/format.js';
 import { toast } from './chrome.js';
-import { CHECKS, STATE_LABEL, STATE_LONG, paramValue, flagsHtml, famLabel, plainLine } from './blocks-card.js';
-import { pxTile, ruleName } from './coin-shared.js';
-import { ideaById, ideaTile } from './blocks-ideas.js';
-import { mountRulePlay, hasPlay } from './rule-play.js';
-import { editorHTML as hsEditorHTML, stateFromDraft, ideaState, refresh as refreshHs, wire as wireHs, needsCheck, testerHTML, mountTester, EXAMPLES } from './hs-editor.js';
+import { CHECKS, STATE_LABEL, STATE_LONG, enfBadges, routeChip, paramRange, paramValue, flagsHtml } from './blocks-card.js';
+import { editorHTML as hsEditorHTML, stateFromDraft, refresh as refreshHs, wire as wireHs, needsCheck, testerHTML, mountTester, EXAMPLES } from './hs-editor.js';
 
 // ───────── formatting ─────────
 export const dur = (s) => {
@@ -261,57 +259,34 @@ function diamondPanel(b) {
       const crowned = !sold && held >= P.hours;
       const v = el.querySelector('[data-o="crown"]');
       v.className = `bd-verdict ${crowned ? 'ok' : 'wait'}`;
-      v.innerHTML = `${pxTile('crown', { size: 40, state: crowned ? 'lit' : 'empty' })}<div><b class="bd-vt">${crowned ? 'Crowned' : sold ? 'No crown' : 'Not yet'}</b>
+      v.innerHTML = `${cube('crown', { size: 40, state: crowned ? 'lit' : 'empty' })}<div><b class="bd-vt">${crowned ? 'Crowned' : sold ? 'No crown' : 'Not yet'}</b>
         <p>${crowned ? `Held ${held}h without selling: this wallet earns from the crown share.` : sold ? 'The record shows a sell, so this wallet can\'t earn the crown on this coin.' : `${P.hours - held}h more without selling and this wallet is crowned.`}</p></div>`;
       crank.update(el, P);
     },
   };
 }
 
-function customPanel(idea = null) {
-  const KEY = idea ? `bd-idea-${idea}` : 'bd-custom';
+function customPanel() {
+  const KEY = 'bd-custom';
   let st = null, seq = 0, tester = null, wired = false;
   return {
     html: () => `<div class="bd-hs">
-      ${idea ? '' : `<div class="bd-hsgo"><button class="btn btn-chrome btn-sm" data-act="draft">Draft from your rule</button>
-        <span class="bd-hsex"><span class="dim">or try</span>${EXAMPLES.map((x) => `<button type="button" class="bd-chip" data-ex="${esc(x.text)}" title="${esc(x.text)}">${esc(x.label)}</button>`).join('')}</span></div>`}
+      <div class="bd-hsgo"><button class="btn btn-chrome btn-sm" data-act="draft">Draft from your rule</button>
+        <span class="bd-hsex"><span class="dim">or try</span>${EXAMPLES.map((x) => `<button type="button" class="bd-chip" data-ex="${esc(x.text)}" title="${esc(x.text)}">${esc(x.label)}</button>`).join('')}</span></div>
       <div data-o="hs" aria-live="polite"></div>
-      <div class="bd-hstest" data-o="testbox" hidden><h4 class="bd-h4">Try some trades</h4>
-        <p class="bd-sub">Buy, sell and send as different wallets and watch the rule decide. The rule remembers between trades, so a crown taken by one buy is still there on the next sell.</p>
+      <div class="bd-hstest" data-o="testbox" hidden><h4 class="bd-h4">Test transfers</h4>
+        <p class="bd-sub">Runs each transfer through the Hookscript interpreter the engine matches bit for bit. The script's state carries over, so a crown taken by one buy is still there on the next sell.</p>
         <div data-o="tester"></div></div>
-      <p class="bd-note">Hookscript reads the trade, both wallets, the clock, the curve and its own memory, and it can only say no. No loops, no calls out. At most 1,024 bytes and 8,000 CU worst case, or it doesn't compile. Every script is fuzzed against 10,000 generated trades and honeypot-checked before it can launch.</p></div>`,
+      <p class="bd-note">Hookscript reads the transfer, both wallets, the clock, the curve and its own state, and it can only refuse. No loops, no calls out. At most 1,024 bytes and 8,000 CU worst case, or it doesn't compile. Every draft is fuzzed against 10,000 generated trades and honeypot-checked before it can launch.</p></div>`,
     mount(el, get) {
-      el.querySelector('[data-act="draft"]')?.addEventListener('click', () => this.draft(el, get().prompt));
+      el.querySelector('[data-act="draft"]').onclick = () => this.draft(el, get().prompt);
       el.querySelectorAll('[data-ex]').forEach((b) => b.addEventListener('click', () => {
         const ta = el.closest('.bd')?.querySelector('#p-prompt');
         if (ta) { ta.value = b.dataset.ex; ta.dispatchEvent(new Event('input', { bubbles: true })); }
         this.draft(el, b.dataset.ex);
       }));
       if (!wired) { wired = true; wireHs(el, { get: () => st, onChange: () => tester?.sourceChanged() }); }
-      if (idea) this.load(el); else this.draft(el, get().prompt);
-    },
-    async show(el, my) {
-      const out = el.querySelector('[data-o="hs"]');
-      out.innerHTML = hsEditorHTML(st, KEY, { rows: idea ? 12 : 8 });
-      if (needsCheck(st)) refreshHs(KEY, st, () => tester?.sourceChanged());
-      const box = el.querySelector('[data-o="testbox"]');
-      box.hidden = false;
-      if (!tester) {
-        const t = el.querySelector('[data-o="tester"]');
-        t.innerHTML = testerHTML();
-        tester = await mountTester(t, () => st?.source ?? '');
-      } else tester.sourceChanged();
-      return my;
-    },
-    async load(el) {
-      const my = ++seq, out = el.querySelector('[data-o="hs"]');
-      out.innerHTML = `<div class="bd-hsload"><span></span><span></span><span></span><em>Loading the rule…</em></div>`;
-      let s0 = null;
-      try { s0 = await ideaState(idea); } catch { /* bundle failed to load */ }
-      if (my !== seq || !out.isConnected) return;
-      if (!s0) { out.innerHTML = '<p class="bd-hserr">This rule didn\'t load. Try again in a moment.</p>'; return; }
-      st = s0;
-      this.show(el, my);
+      this.draft(el, get().prompt);
     },
     async draft(el, prompt) {
       const my = ++seq, out = el.querySelector('[data-o="hs"]');
@@ -330,7 +305,15 @@ function customPanel(idea = null) {
         return;
       }
       st = stateFromDraft(d, text);
-      this.show(el, my);
+      out.innerHTML = hsEditorHTML(st, KEY, { rows: 8 });
+      if (needsCheck(st)) refreshHs(KEY, st, () => tester?.sourceChanged());
+      const box = el.querySelector('[data-o="testbox"]');
+      box.hidden = false;
+      if (!tester) {
+        const t = el.querySelector('[data-o="tester"]');
+        t.innerHTML = testerHTML();
+        tester = await mountTester(t, () => st?.source ?? '');
+      } else tester.sourceChanged();
     },
     update() {},
   };
@@ -354,7 +337,7 @@ function explainer(b) {
     case 'leftover-burn': return { title: 'What happens at graduation', panel: leftoverPanel() };
     case 'lp-lock': return { title: 'The graduation position', panel: lpPanel() };
     case 'diamond-tiers': return { title: 'Who wears a crown', panel: diamondPanel(b) };
-    case 'custom': return { title: 'Your rule, in Hookscript', panel: customPanel() };
+    case 'custom': return { title: 'Write it in Hookscript', panel: customPanel() };
     case 'locked-metadata': return { title: 'What the mint says', panel: staticPanel([
       ['Metadata update authority', 'none'], ['Set in', 'create mint (launch instruction 1)'], ['Name, ticker, image, URI', 'final'],
     ], 'Nothing is refused. Token-2022 keeps the metadata on the mint itself, and with no update authority nobody can change it again, hookrz included.') };
@@ -364,69 +347,53 @@ function explainer(b) {
 
 // ───────── the drawer ─────────
 let current = null;
-const ARROW = '<svg class="arrow" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 8h11M9 4l4 4-4 4"/></svg>';
 
-/** The technical spec, at the bottom of the drawer: enforcer, checks, compute, accounts, code, state, route. */
-function techHtml(b, id) {
-  const rows = [
-    ['Enforced by', [b.enforcedBy, b.also].filter(Boolean).map((e) => `<span class="enf ${e}"><i></i>${ENFORCERS[e].name}</span> <span class="muted">${esc(ENFORCERS[e].long)}</span>`).join('<br>')],
-    ['Checks', CHECKS[id] ? CHECKS[id].map((x) => x + 's').join(' · ') : b.id === 'custom' ? 'what your rule says' : 'no transfers'],
-    ['CU per transfer', `<span class="num">${b.cuRange ? `${b.cuRange[0].toLocaleString('en-US')}–${b.cuRange[1].toLocaleString('en-US')}` : b.cu ? b.cu.toLocaleString('en-US') : '0'}</span>`],
-    ['Extra accounts', `<span class="num">+${b.accts}</span>`],
-    ['Error code', `<span class="num">${hex(b.code)}</span>${b.code != null ? ` <span class="dim">${errName(b.code)}</span>` : ''}`],
-    ['State', `${STATE_LABEL[b.state]} <span class="muted">${esc(STATE_LONG[b.state])}</span>`],
-    ['Route', b.route === 'record' ? 'Wallet record <span class="muted">A receiving wallet needs its record. The hookrz router opens it inside the buy; aggregator routes work once it exists.</span>' : 'Any <span class="muted">Works through the hookrz router, aggregators and wallet-to-wallet sends.</span>'],
-  ];
-  return `<details class="bd-sec bd-tech"><summary><span class="bd-h">Under the hood</span><span class="bd-tech-s">Code ${hex(b.code)} · ${b.cu ? `${b.cu.toLocaleString('en-US')} CU` : 'no compute'} · ${[b.enforcedBy, b.also].filter(Boolean).map((e) => ENFORCERS[e].name).join(' + ')}</span></summary>
-    <dl class="bd-kvt">${rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl></details>`;
-}
-
-/**
- * Open the details drawer for a rule (`id`), or for a rule idea written in Hookscript ({ idea: '<example name>' }).
- */
-export function openDetail(id, { opener, idea = null } = {}) {
-  const ix = idea ? ideaById[idea] : null;
-  if (idea && !ix) return;
-  if (ix) id = 'custom';
+export function openDetail(id, { opener } = {}) {
   const b = byId[id];
   if (!b) return;
   current?.close(true);
   const fam = familyOf(b.family);
   const P = { ...defaults(id) };
-  const scen = ix ? null : SCEN[id];
+  const scen = SCEN[id];
   let K = scen ? { ...BASE, ...scen.refuse } : null;
   const hasTester = !!scen;
-  const exp = hasTester ? null : ix ? { title: 'The rule, in Hookscript', panel: customPanel(ix.id) } : explainer(b);
-  const params = ix ? [] : b.params;
-  const useHref = ix ? `build.html?idea=${encodeURIComponent(ix.id)}` : `build.html?add=${id}`;
+  const exp = hasTester ? null : explainer(b);
 
   const back = document.createElement('div');
   back.className = 'bd-back';
   back.innerHTML = `<aside class="bd" role="dialog" aria-modal="true" aria-labelledby="bd-title" tabindex="-1">
     <header class="bd-head">
-      ${ix ? ideaTile(ix, 52) : pxTile(b.family, { size: 52 })}
-      <div class="bd-ht"><span class="bd-eye">${ix ? 'Rule idea · written in Hookscript' : b.id === 'custom' ? 'Written in Hookscript' : `${esc(famLabel(b.family))} · ${esc(fam.verb.toLowerCase())}`}</span><h2 id="bd-title">${esc(ix ? ix.name : ruleName(b))}</h2><p>${esc(ix ? ix.line : plainLine(b))}</p></div>
+      ${cube(b.family, { size: 60 })}
+      <div class="bd-ht"><span class="eyebrow">${esc(fam.name)} · ${esc(fam.verb)}</span><h2 id="bd-title">${esc(b.name)}</h2><p>${esc(b.tagline)}</p></div>
       <button class="bd-x" aria-label="Close"><svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3l8 8M11 3l-8 8"/></svg></button>
     </header>
     <div class="bd-body">
-      ${ix || b.id === 'custom' ? '' : `<section class="bd-sec bd-first"><h3 class="bd-h">What it does</h3><p class="bd-refuses">${esc(b.refuses)}</p></section>`}
-      ${ix && hasPlay(ix.id) ? `<section class="bd-sec bd-first bd-play"><h3 class="bd-h">Watch it play</h3><div data-o="play"></div></section>` : ''}
-      ${!ix && (b.risk || b.power || b.unreviewed) ? `<div class="bk-flags">${flagsHtml(b, { long: true })}</div>` : ''}
-      ${params.length ? `<section class="bd-sec"><div class="row between"><h3 class="bd-h">Settings</h3><button class="btn btn-ghost btn-sm" data-act="reset">Reset</button></div>
-        <div class="bd-params">${params.map((p) => paramHtml(p, P[p.key])).join('')}</div></section>` : ''}
-      ${hasTester ? `<section class="bd-sec bd-test"><div class="row between wrap-row" style="gap:8px"><h3 class="bd-h">Try a trade</h3>
-          <div class="row" style="gap:6px"><button class="btn btn-ghost btn-sm" data-scen="refuse">One it blocks</button><button class="btn btn-ghost btn-sm" data-scen="land">One that goes through</button></div></div>
-        <p class="bd-sub">Runs the engine's own code on one trade: the same answer a quote gives before you sign.</p>
-        <div class="bd-seg" role="radiogroup" aria-label="Trade kind">${['buy', 'sell', 'send'].map((x) => `<button role="radio" data-kind="${x}">${x[0].toUpperCase() + x.slice(1)}${CHECKS[id].includes(x) ? '' : '<small>not checked</small>'}</button>`).join('')}</div>
+      <div class="bd-badges">${enfBadges(b)}${routeChip(b)}<span class="chip">${b.state === 'none' ? 'Stateless' : STATE_LABEL[b.state]}</span></div>
+      <dl class="bd-spec">
+        <div class="wide"><dt>Enforced by</dt><dd>${[b.enforcedBy, b.also].filter(Boolean).map((e) => `<span class="enf ${e}"><i></i>${ENFORCERS[e].name}</span> <span class="muted">${esc(ENFORCERS[e].long)}</span>`).join('<br>')}</dd></div>
+        <div><dt>Checks</dt><dd>${CHECKS[id] ? CHECKS[id].map((x) => x + 's').join(' · ') : b.id === 'custom' ? 'what your rule says' : 'no transfers'}</dd></div>
+        <div><dt>CU per transfer</dt><dd class="num">${b.cuRange ? `${b.cuRange[0].toLocaleString('en-US')}–${b.cuRange[1].toLocaleString('en-US')}` : b.cu ? b.cu.toLocaleString('en-US') : '0'}</dd></div>
+        <div><dt>Extra accounts</dt><dd class="num">+${b.accts}</dd></div>
+        <div><dt>Error code</dt><dd class="num">${hex(b.code)}${b.code != null ? ` <span class="dim">${errName(b.code)}</span>` : ''}</dd></div>
+        <div class="wide"><dt>State</dt><dd>${STATE_LABEL[b.state]} <span class="muted">${esc(STATE_LONG[b.state])}</span></dd></div>
+        <div class="wide"><dt>Route</dt><dd>${b.route === 'record' ? 'Wallet record <span class="muted">A receiving wallet needs its record. The hookrz router opens it inside the buy; aggregator routes work once it exists.</span>' : 'Any <span class="muted">Works through the hookrz router, aggregators and wallet-to-wallet sends.</span>'}</dd></div>
+      </dl>
+      <section class="bd-sec"><h3 class="bd-h">Refuses</h3><p class="bd-refuses">${esc(b.refuses)}</p></section>
+      ${b.risk || b.power || b.unreviewed ? `<div class="bk-flags">${flagsHtml(b, { long: true })}</div>` : ''}
+      ${b.params.length ? `<section class="bd-sec"><div class="row between"><h3 class="bd-h">Settings</h3><button class="btn btn-ghost btn-sm" data-act="reset">Reset</button></div>
+        <div class="bd-params">${b.params.map((p) => paramHtml(p, P[p.key])).join('')}</div></section>` : ''}
+      ${b.error && b.id !== 'custom' ? `<section class="bd-sec"><h3 class="bd-h">The error a refused transfer gets</h3>
+        <div class="bd-err"><span class="mono code">${hex(b.code)}</span><p data-o="err"></p></div></section>` : ''}
+      ${hasTester ? `<section class="bd-sec bd-test"><div class="row between wrap-row" style="gap:8px"><h3 class="bd-h">Test a transfer</h3>
+          <div class="row" style="gap:6px"><button class="btn btn-ghost btn-sm" data-scen="refuse">Refused example</button><button class="btn btn-ghost btn-sm" data-scen="land">Landing example</button></div></div>
+        <p class="bd-sub">Runs the engine's reference code against one transfer, the same verdict a quote gives before you sign.</p>
+        <div class="bd-seg" role="radiogroup" aria-label="Transfer kind">${['buy', 'sell', 'send'].map((x) => `<button role="radio" data-kind="${x}">${x[0].toUpperCase() + x.slice(1)}${CHECKS[id].includes(x) ? '' : '<small>not checked</small>'}</button>`).join('')}</div>
         <div class="bd-knobs" data-o="knobs"></div>
         <div class="bd-verdict" data-o="verdict" aria-live="polite"></div>
       </section>` : ''}
-      ${b.error && b.id !== 'custom' ? `<section class="bd-sec"><h3 class="bd-h">What a blocked trade says</h3>
-        <div class="bd-err"><p data-o="err"></p><span class="mono code" title="Error ${hex(b.code)} ${errName(b.code)}">${hex(b.code)}</span></div></section>` : ''}
       ${exp ? `<section class="bd-sec"><h3 class="bd-h">${esc(exp.title)}</h3><div data-o="exp">${exp.panel.html()}</div></section>` : ''}
-      ${ix ? '' : techHtml(b, id)}
     </div>
-    <footer class="bd-foot"><a class="btn btn-chrome" href="${useHref}">${ix ? 'Launch with this' : 'Use this rule'} ${ARROW}</a><button class="btn btn-glass" data-act="copy">Copy link</button></footer>
+    <footer class="bd-foot"><a class="btn btn-chrome" href="build.html?add=${id}">Add to a stack <svg class="arrow" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 8h11M9 4l4 4-4 4"/></svg></a><button class="btn btn-glass" data-act="copy">Copy link</button></footer>
   </aside>`;
   document.body.append(back);
   document.documentElement.classList.add('bd-lock');
@@ -435,7 +402,7 @@ export function openDetail(id, { opener, idea = null } = {}) {
 
   // ── params
   const refreshParams = () => {
-    for (const p of params) {
+    for (const p of b.params) {
       const o = el.querySelector(`[data-param="${p.key}"] output`);
       if (o) o.textContent = paramValue(p, P[p.key]);
     }
@@ -444,14 +411,14 @@ export function openDetail(id, { opener, idea = null } = {}) {
     if (hasTester) runTest();
     if (exp) exp.panel.update(el.querySelector('[data-o="exp"]'), P);
   };
-  for (const p of params) {
+  for (const p of b.params) {
     const input = el.querySelector(`#p-${p.key}`);
     if (!input) continue;
     input.addEventListener('input', () => { P[p.key] = p.options || p.text ? input.value : +input.value; refreshParams(); });
   }
   el.querySelector('[data-act="reset"]')?.addEventListener('click', () => {
     Object.assign(P, defaults(id));
-    for (const p of params) { const i = el.querySelector(`#p-${p.key}`); if (i) i.value = P[p.key]; }
+    for (const p of b.params) { const i = el.querySelector(`#p-${p.key}`); if (i) i.value = P[p.key]; }
     refreshParams();
   });
 
@@ -478,14 +445,14 @@ export function openDetail(id, { opener, idea = null } = {}) {
     if (v.ok) {
       const unchecked = !CHECKS[id].includes(K.kind);
       box.className = 'bd-verdict ok';
-      box.innerHTML = `${pxTile('check', { size: 40, state: 'lit' })}<div><b class="bd-vt">Goes through</b><span class="bd-vwhat">${esc(what)}</span>
-        <p>${unchecked ? `${esc(b.name)} doesn't check ${K.kind}s, so the trade goes through.` : `${esc(b.name)} lets it through. The trade settles.`}</p></div>`;
+      box.innerHTML = `${cube(b.family, { size: 40, state: 'lit' })}<div><b class="bd-vt">Lands</b><span class="bd-vwhat">${esc(what)}</span>
+        <p>${unchecked ? `${esc(b.name)} doesn't check ${K.kind}s, so the engine lets it through.` : `${esc(b.name)} passes it. The transfer settles.`}</p></div>`;
     } else {
       const hi = K.amountPct;
       const lo = largestAllowed(stack, (a) => buildCtx({ ...K, amountPct: a }), hi);
-      const hint = lo > 1e-6 ? `Largest ${K.kind} that goes through now: <b class="num">${+lo.toFixed(3)}% of supply</b>` : `No ${K.kind} of any size goes through right now.`;
+      const hint = lo > 1e-6 ? `Largest ${K.kind} that lands now: <b class="num">${+lo.toFixed(3)}% of supply</b>` : `No ${K.kind} of any size lands under these conditions.`;
       box.className = 'bd-verdict no';
-      box.innerHTML = `${pxTile('cross', { size: 40, state: 'refused' })}<div><b class="bd-vt">Blocked <span class="mono" title="Error ${hex(v.code)} ${errName(v.code)}">${hex(v.code)}</span></b><span class="bd-vwhat">${esc(what)}</span>
+      box.innerHTML = `${cube(b.family, { size: 40, state: 'refused' })}<div><b class="bd-vt">Refused <span class="mono">${hex(v.code)}</span></b><span class="bd-vwhat">${esc(what)}</span>
         <p class="msg">${esc(v.message)}</p><p class="hint">${hint}</p></div>`;
     }
   }
@@ -499,17 +466,15 @@ export function openDetail(id, { opener, idea = null } = {}) {
   }
   if (exp) exp.panel.mount(el.querySelector('[data-o="exp"]'), () => P);
   refreshParams();
-  // a rule idea plays a short scene through its real script first (the footer already has "Launch with this")
-  const play = ix && hasPlay(ix.id) ? mountRulePlay(el.querySelector('[data-o="play"]'), { ids: [ix.id], launch: false, head: false }) : null;
 
   // ── chrome: close, copy, focus, url
   const url = new URL(location.href);
-  if (ix) { url.searchParams.set('idea', ix.id); url.searchParams.delete('b'); } else { url.searchParams.set('b', id); url.searchParams.delete('idea'); }
+  url.searchParams.set('b', id);
   history.replaceState(history.state, '', url);
   const keydown = (e) => {
     if (e.key === 'Escape') close();
     if (e.key === 'Tab') {
-      const f = [...el.querySelectorAll('a[href],button,input,select,textarea,summary')].filter((n) => !n.disabled && n.offsetParent !== null);
+      const f = [...el.querySelectorAll('a[href],button,input,select,textarea')].filter((n) => !n.disabled && n.offsetParent !== null);
       if (!f.length) return;
       if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f.at(-1).focus(); }
       else if (!e.shiftKey && document.activeElement === f.at(-1)) { e.preventDefault(); f[0].focus(); }
@@ -519,20 +484,19 @@ export function openDetail(id, { opener, idea = null } = {}) {
   back.addEventListener('mousedown', (e) => { if (e.target === back) close(); });
   el.querySelector('.bd-x').onclick = () => close();
   el.querySelector('[data-act="copy"]').onclick = async () => {
-    const link = `${location.origin}${location.pathname}?${ix ? `idea=${ix.id}` : `b=${id}`}`;
+    const link = `${location.origin}${location.pathname}?b=${id}`;
     try { await navigator.clipboard.writeText(link); toast('Link copied'); } catch { toast(link); }
   };
   el.focus({ preventScroll: true });
 
   function close(replaced = false) {
-    play?.destroy();
     document.removeEventListener('keydown', keydown);
     back.classList.remove('in');
     back.classList.add('out');
     setTimeout(() => back.remove(), 180);
     if (!replaced) {
       document.documentElement.classList.remove('bd-lock');
-      const u = new URL(location.href); u.searchParams.delete('b'); u.searchParams.delete('idea'); history.replaceState(history.state, '', u);
+      const u = new URL(location.href); u.searchParams.delete('b'); history.replaceState(history.state, '', u);
       opener?.focus?.({ preventScroll: true });
     }
     if (current?.el === el) current = null;

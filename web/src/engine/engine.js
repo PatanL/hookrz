@@ -7,16 +7,15 @@ import { byId, ENGINE, rentSol, defaults } from '../data/blocks.js';
 /** Which extra accounts each hook block needs; the engine adds the union to ExtraAccountMetaList. */
 const NEEDS = {
   'circuit-breaker': ['pool'], 'lock-in': ['pool'], 'chapters': ['pool'],
-  'blocklist': ['markSrc', 'markDst'], 'allowlist-phase': ['markSrc', 'markDst'],
-  'token-gate': ['gateMint', 'gateProgram', 'ataProgram', 'gateAta'],
+  'blocklist': ['blockSrc', 'blockDst'], 'token-gate': ['gateMint', 'gateAta'], 'allowlist-phase': ['passDst'],
   'custom': ['pool', 'script'],
 };
 const ACCOUNT_LABEL = {
   stack: 'Stack PDA ["stack", mint]', pool: 'Meteora DBC pool (read-only price + progress)',
   walletSrc: 'Wallet record of sender ["w", mint, source]', walletDst: 'Wallet record of receiver ["w", mint, destination]',
-  markSrc: 'Mark of sender\'s owner ["mark", mint, owner] (blocklist, pass)', markDst: 'Mark of receiver\'s owner ["mark", mint, owner] (blocklist, pass)',
-  gateMint: 'Gate token mint', gateProgram: 'Gate token program', ataProgram: 'Associated Token Account program',
-  gateAta: 'Receiver\'s gate-token account (ATA derived from destination owner)',
+  blockSrc: 'Block marker of sender ["block", mint, owner]', blockDst: 'Block marker of receiver ["block", mint, owner]',
+  gateMint: 'Gate token mint', gateAta: 'Receiver\'s gate-token account (ATA derived from destination owner)',
+  passDst: 'Allowlist pass of receiver ["pass", mint, owner]',
   script: 'Hookscript account ["script", mint]: bytecode + the coin\'s script state',
 };
 

@@ -6,7 +6,6 @@ import { FAMILIES, ENFORCERS, ENGINE, BLOCKS, PRESETS, rentSol, hex } from '../d
 import { FEES, SERVICES } from '../api/contract.js';
 import { api } from '../api/client.js';
 import { esc } from '../core/format.js';
-import { pixelIcon } from '../ui/pixel.js';
 import { tintHookscript } from '../ui/docs-hookscript.js';
 import { archDiagram, STACK_LAYOUT, SLOT_LAYOUT, WALLET_LAYOUT, SCRIPT_LAYOUT, byteMap, layoutTable, metaTable, budgetPanel, launchTimeline, txBar, solf } from '../ui/docs-engine.js';
 import { apiReference, apiExamples, errorTable, feesVisual } from '../ui/docs-ref.js';
@@ -18,12 +17,13 @@ const c = (s) => `<code>${s}</code>`;
 const count = (fn) => BLOCKS.filter(fn).length;
 const recordBlocks = BLOCKS.filter((b) => b.state === 'wallet');
 const metaBytes = (k) => 8 + 4 + k * 35;
+const authorPct = FEES.split.find((s) => s.who === 'Stack author')?.pct ?? 10;
 const creatorPct = FEES.split.find((s) => s.who === 'Creator')?.pct ?? 50;
 const platformPct = FEES.split.find((s) => s.who === 'hookrz')?.pct ?? 40;
 
 const SECTIONS = [
-  ['overview', 'Overview'], ['blocks', 'Rules: blocks & stacks'], ['engine', 'The engine'], ['launch', 'Launch'],
-  ['graduation', 'Graduation'], ['routes', 'Routes & quotes'], ['remix', 'Remixes'], ['fees', 'Fees'],
+  ['overview', 'Overview'], ['blocks', 'Blocks & stacks'], ['engine', 'The engine'], ['launch', 'Launch'],
+  ['graduation', 'Graduation'], ['routes', 'Routes & quotes'], ['remix', 'Remix & royalties'], ['fees', 'Fees'],
   ['trust', 'Trust model'], ['hookscript', 'Hookscript'], ['api', 'API'], ['errors', 'Error codes'], ['faq', 'FAQ'],
 ];
 const head = (id, title, lede) => {
@@ -39,7 +39,7 @@ const FAQ = [
   ['Do aggregators work?', 'Yes. Aggregators read the hook\'s accounts from the mint like any Token-2022 hook. On stacks with wallet-record blocks, the receiving wallet needs its record first; one buy through hookrz opens it. After graduation there is no hook at all.'],
   ['Who pays the wallet-record rent?', `The wallet that gets the record, inside its first buy through hookrz: about ${rentSol(ENGINE.walletRecordBytes).toFixed(4)} SOL. After graduation anyone can close the record, and the rent goes back to that wallet.`],
   ['Can the creator rug with a rule?', 'A rule can only refuse a transfer; it can\'t move anyone\'s coins. Mint and freeze authority are none. The blocks that could trap holders are marked: Lock-in Phase shows in red on the coin page, Blocklist is labelled a creator power with its freeze date, and Custom blocks carry an unreviewed badge. Creator Vesting does the opposite: it locks the creator\'s own bag.'],
-  ['How is this different from one-rule hook launchpads?', 'A mint can name only one hook program. Launchpads with a program per rule can give a coin one rule. hookrz gives every coin the same engine and a stack of up to six blocks that run together, rules written in plain English with Hookscript, and on-chain remix lineage.'],
+  ['How is this different from one-rule hook launchpads?', 'A mint can name only one hook program. Launchpads with a program per rule can give a coin one rule. hookrz gives every coin the same engine and a stack of up to six blocks that run together, plus remix lineage and a royalty for the stack\'s author.'],
   ['What does a refused transfer cost?', 'The network fee. The transaction fails before anything settles. Quotes run the stack before you sign, so most refusals are never sent.'],
   ['Can I run the keeper myself?', 'Yes. Every keeper instruction checks its own conditions on chain, so anyone can call them and the result is the same. hookrz runs one so nothing waits.'],
 ];
@@ -50,21 +50,11 @@ app.innerHTML = `
     <div class="dc-hero-grid">
       <div class="dc-hero-copy">
         <span class="eyebrow">Docs</span>
-        <h1 class="chrome-text">How hookrz works in 60 seconds</h1>
-        <p class="lede">The short version first. Everything technical follows below.</p>
+        <h1 class="chrome-text">How hookrz works</h1>
+        <p class="lede">One Token-2022 transfer-hook program runs every coin's stack of rule blocks on every transfer. This is how it's built, what it refuses, who gets paid and what you can call.</p>
       </div>
       <img class="dc-hero-img" src="${asset('img/brand/engine-rack-900.webp')}" alt="Six chrome blocks seated in the engine rack, a light cable running through them" width="900" height="506">
     </div>
-    <section class="dc-60" aria-label="The short version">
-      <ol class="dc-60-list">
-        <li>${pixelIcon('guard', { size: 24 })}<div><b>Pick your rules.</b><p>Choose a ready-made rulebook, or describe your own rule in plain English and hookrz writes it for you.</p></div></li>
-        <li>${pixelIcon('arrow', { size: 24 })}<div><b>Launch in one transaction.</b><p>Your coin, its trading curve and its rules go live together. Nobody can trade before the rules are on.</p></div></li>
-        <li>${pixelIcon('lock', { size: 24 })}<div><b>The chain enforces them.</b><p>Every buy, sell and send is checked. A trade that breaks a rule is blocked before it settles. Rules can only say no; they can't move anyone's coins.</p></div></li>
-        <li>${pixelIcon('crown', { size: 24 })}<div><b>Nobody can change them.</b><p>Not you, not hookrz: the rules are fixed at launch, and hookrz never holds your keys. Like a coin's rules? Remix them into a new coin.</p></div></li>
-      </ol>
-    </section>
-    <p class="dc-tech-l pixel">Under the hood</p>
-    <p class="dc-tech-p">One Token-2022 transfer-hook program runs every coin's stack of rule blocks on every transfer. This is how it's built, what it refuses, who gets paid and what you can call.</p>
     <dl class="dc-facts">
       <div><dt>Engine</dt><dd class="mono">${ENGINE.program}</dd></div>
       <div><dt>Slots per stack</dt><dd class="num">${ENGINE.maxSlots}</dd></div>
@@ -80,7 +70,7 @@ app.innerHTML = `
   <nav class="dc-nav" aria-label="On this page">
     <span class="pixel dc-nav-t">On this page</span>
     <ol>${SECTIONS.map(([id, t], i) => `<li><a href="#${id}" data-nav="${id}"><span class="mono">${String(i + 1).padStart(2, '0')}</span>${esc(t)}</a></li>`).join('')}</ol>
-    <a class="dc-nav-cta" href="blocks.html">All rules <span aria-hidden="true">→</span></a>
+    <a class="dc-nav-cta" href="blocks.html">Block catalog <span aria-hidden="true">→</span></a>
   </nav>
   <div class="dc-mnav"><label class="sr" for="dcSel">Jump to section</label>
     <select class="input" id="dcSel">${SECTIONS.map(([id, t], i) => `<option value="${id}">${String(i + 1).padStart(2, '0')} · ${esc(t)}</option>`).join('')}</select></div>
@@ -92,13 +82,13 @@ app.innerHTML = `
     <div class="dc-three">
       <div><span class="pixel">Build</span><p>Snap up to ${ENGINE.maxSlots} blocks into a stack: Guard, Pace, Burn, Flow, Crown or a Custom rule. Tune each one, check what it costs, launch. The coin, its curve and its rules go on chain in one transaction, and from the first trade the engine runs the stack on every transfer.</p></div>
       <div><span class="pixel">Remix</span><p>Every stack is public. One click loads a coin's stack into the builder; change a setting, swap a block, launch your own. The new Stack records its parent, so lineage lives on chain and every coin page shows where its rules came from.</p></div>
-      <div><span class="pixel">Own</span><p>The creator owns the coin and keeps ${creatorPct} of every 100 fee units it earns. The rules are the creator's too: once launched, nobody can change them, hookrz included.</p></div>
+      <div><span class="pixel">Own</span><p>A stack's author earns ${authorPct} of every 100 fee units on each coin that remixes it, one level up. Creators keep ${creatorPct} on their own coin. Good rules get copied; here, copying pays the author.</p></div>
     </div>
-    ${callout('One hook per mint', `<p>A Token-2022 mint names exactly one transfer-hook program, fixed when the mint is created. A launchpad with a program per rule can give a coin one rule, and one that compiles a program per coin ships new code with every launch. hookrz points every mint at the same engine, ${c(ENGINE.program)}, and keeps the rules as data: a stack of up to ${ENGINE.maxSlots} blocks the engine runs in order. One program to audit, any combination of rules, and stacks that can be copied and traced back to where they came from.</p>`, 'key')}
+    ${callout('One hook per mint', `<p>A Token-2022 mint names exactly one transfer-hook program, fixed when the mint is created. A launchpad with a program per rule can give a coin one rule, and one that compiles a program per coin ships new code with every launch. hookrz points every mint at the same engine, ${c(ENGINE.program)}, and keeps the rules as data: a stack of up to ${ENGINE.maxSlots} blocks the engine runs in order. One program to audit, any combination of rules, and stacks that can be copied, credited and paid.</p>`, 'key')}
   </section>
 
   <section class="dc-sec" id="blocks">
-    ${head('blocks', 'Blocks and stacks', `A block is one rule with a few settings. A stack is up to ${ENGINE.maxSlots} blocks in order. Every block has a family, which says what it is about, and an enforcer, which says what makes it true. On the rest of the site a block is called a rule, and a stack a rulebook.`)}
+    ${head('blocks', 'Blocks and stacks', `A block is one rule with a few settings. A stack is up to ${ENGINE.maxSlots} blocks in order. Every block has a family, which says what it is about, and an enforcer, which says what makes it true.`)}
     <h3>Families</h3>
     <div class="tscroll"><table class="table dc-ftable"><thead><tr><th>Family</th><th>Answers</th><th class="r">Blocks</th><th>What's in it</th></tr></thead><tbody>
       ${FAMILIES.map((f) => `<tr><td><a href="blocks.html#${f.id}" class="dc-fam"><img src="${asset(`img/brand/block-${f.id}-sm.webp`)}" alt="" width="240" height="240" loading="lazy">${f.name}</a></td><td>${esc(f.verb)}</td><td class="mono r">${count((b) => b.family === f.id)}</td><td class="note">${esc(f.blurb)}</td></tr>`).join('')}
@@ -192,7 +182,7 @@ app.innerHTML = `
     <div class="tscroll"><table class="table"><thead><tr><th>Enforcer</th><th>On the curve</th><th>After graduation</th></tr></thead><tbody>
       <tr><td><span class="enf hook"><i></i>Hook</span></td><td>Runs on every transfer</td><td>Retired. The mint keeps its TransferHook extension, with an empty program id.</td></tr>
       <tr><td><span class="enf curve"><i></i>Curve</span></td><td>Fee scheduler, fee split</td><td>Migration settings apply once: LP Lock, Leftover Burn.</td></tr>
-      <tr><td><span class="enf crank"><i></i>Crank</span></td><td>Keeper spends the creator's DBC fees</td><td>Keeper spends DAMM v2 LP fees.</td></tr>
+      <tr><td><span class="enf crank"><i></i>Crank</span></td><td>Keeper spends the creator's DBC fees</td><td>Keeper spends DAMM v2 LP fees. Royalties keep flowing.</td></tr>
       <tr><td><span class="enf ext"><i></i>Mint</span></td><td>Fixed at creation</td><td>Unchanged.</td></tr>
     </tbody></table></div>
     <h3>Getting the rent back</h3>
@@ -224,22 +214,23 @@ app.innerHTML = `
   </section>
 
   <section class="dc-sec" id="remix">
-    ${head('remix', 'Remixes', 'Every stack is public, and every coin page has a Remix button. A remix loads the parent\'s blocks and settings into the builder; change anything, then launch.')}
-    <p>Lineage is on chain. ${c('init_stack')} reads the parent's Stack account and copies its address and its creator into the new Stack (${c('parent_stack')}, ${c('parent_author')}). A link can't point at a stack that doesn't exist, and the parent's creator is whoever really launched it.</p>
+    ${head('remix', 'Remix and royalties', 'Every stack is public, and every coin page has a Remix button. A remix loads the parent\'s blocks and settings into the builder; change anything, then launch.')}
+    <p>Lineage is on chain. ${c('init_stack')} reads the parent's Stack account and copies its address and its creator into the new Stack (${c('parent_stack')}, ${c('parent_author')}). A link can't point at a stack that doesn't exist, and the author is whoever really launched the parent.</p>
     <div class="dc-wide">
-      <div class="tree" role="img" aria-label="A remix tree: each coin links to the one it remixed">
-        <div class="tree-node"><span class="pixel">Original</span><b>Ada's coin</b><small>Snipe Shield, Sell Cap and Hold Timer.</small></div>
-        <div class="tree-edge"><span class="mono">remixed by Ben</span></div>
-        <div class="tree-node"><span class="pixel">Remix</span><b>Ben's coin</b><small>Ada's rules with Sell Cap tightened to 0.5%.</small></div>
-        <div class="tree-edge"><span class="mono">remixed by Cy</span></div>
-        <div class="tree-node"><span class="pixel">Remix of a remix</span><b>Cy's coin</b><small>Ben's rules plus Diamond Tiers. Its page links back to Ben's, and Ben's to Ada's.</small></div>
+      <div class="tree" role="img" aria-label="Royalties go one level up">
+        <div class="tree-node"><span class="pixel">Original</span><b>Stack by Ada</b><small>Ada's own coin: she is creator and author. She keeps the ${authorPct}.</small></div>
+        <div class="tree-edge"><span class="mono">${authorPct} of 100 → Ada</span></div>
+        <div class="tree-node"><span class="pixel">Remix</span><b>Ben's coin</b><small>Pays Ada ${authorPct} of every 100 fee units.</small></div>
+        <div class="tree-edge"><span class="mono">${authorPct} of 100 → Ben</span></div>
+        <div class="tree-node"><span class="pixel">Remix of a remix</span><b>Cy's coin</b><small>Pays Ben, its direct parent. Ada gets nothing from Cy.</small></div>
       </div>
     </div>
     <ul class="dc-list">
-      <li><b>A remix is a copy, not a link.</b> The new coin gets its own Stack with every block and setting written into it. Nothing the parent does later changes the child.</li>
-      <li><b>The parent is recorded once.</b> ${c('parent_stack')} points at the direct parent; walking the links up gives the whole tree, which the coin page and ${c('GET /v1/stacks/:id/lineage')} show.</li>
-      <li><b>What changed is visible.</b> Every remix in the tree shows the blocks it added, removed or retuned.</li>
-      <li><b>No extra cost.</b> A remix is a normal launch, with the usual fee split on the new coin.</li>
+      <li><b>${authorPct} of every 100 fee units</b> on the child coin go to the parent's author.</li>
+      <li><b>One level only.</b> A remix pays its direct parent, never a grandparent, so royalties can't pile up into a pyramid and a remix never pays more than ${authorPct}.</li>
+      <li><b>Paid by the keeper from the platform share.</b> The DBC pool splits the fee between creator and platform; the keeper moves the author's part to a royalty vault every hour. Claim it with ${c('POST /v1/fees/claim/prepare')}.</li>
+      <li><b>Originals keep it.</b> On a coin with no parent, the author is the creator.</li>
+      <li><b>It doesn't stop at graduation.</b> LP fees on DAMM v2 are split the same way.</li>
     </ul>
   </section>
 
